@@ -182,6 +182,10 @@ yours with `./fff school`, then `./fff refresh` and `./fff maillog`.
 `data/page-files.json`, the flyer images it shows. Any static host will serve
 it. Put your own introduction at the top with `"page"` in `data/config.json`.
 
+Every event on the page links to Google Calendar and Outlook with its details
+filled in, and an RSVP deadline counts down as the page is read: "RSVP by
+tomorrow", then "RSVP closed".
+
 Published as a [Claude Artifact](https://claude.ai), the page can also take
 **submissions**: classmates with edit access post events, and the page
 republishes itself with them. Every rebuild must then be given the live page,

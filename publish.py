@@ -19,7 +19,8 @@ import html
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
+from urllib.parse import quote, urlencode
 
 import docket
 import school
@@ -78,20 +79,21 @@ DEFAULT_ABOUT = """
 
 
 def sources_html(profile) -> str:
-    """Where the events come from, as the footer says it."""
-    parts = []
+    """Where the events come from, as the footer says it.
+
+    Email first: it is where most events arrive. Student posts are credited
+    in the footer's last line, beside the count.
+    """
+    parts = ["the emails student organisations, school offices and employers "
+             "send to the school"]
     if profile.CALENDAR:
         parts.append(profile.CALENDAR_NAME or "the school&rsquo;s public events calendar")
     flyers = profile.FLYERS or {}
     if flyers:
-        parts.append(flyers.get("description") or "the school&rsquo;s flyer newsletter")
-    if not parts:
-        parts.append("email from student organisations and offices")
-    text = "Everything here is read out of " + " and ".join(parts)
-    if flyers:
-        text += (" &mdash; including the broadcast&rsquo;s flyers, which are "
-                 "images, and are read with OCR")
-    return text + "."
+        parts.append((flyers.get("description") or "the school&rsquo;s flyer newsletter")
+                     + ", whose flyers are images and are read with OCR")
+    listed = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+    return "Everything here is read out of " + listed + "."
 
 
 def page_copy(cfg: dict = None) -> dict:
@@ -156,8 +158,68 @@ def build(conn, days: int = 35, min_tier: str = "possible",
             "bytes": size}
 
 
+GOOGLE_CALENDAR = "https://calendar.google.com/calendar/render"
+OUTLOOK_CALENDAR = "https://outlook.office.com/calendar/0/deeplink/compose"
+
+
+def calendar_links(event: dict, timezone: str = "") -> dict:
+    """{"google", "outlook"}: links that open the event, filled in, in the
+    reader's own calendar. {} when the event has no usable start.
+
+    Links rather than a calendar file because a page in the artifact sandbox
+    cannot hand a viewer an .ics: the downloads it may offer are images,
+    documents, archives and text. A link is all either calendar needs.
+    Times are the school's wall clock; Google is told which zone that is.
+    """
+    try:
+        start = datetime.fromisoformat(event.get("starts_at") or "")
+    except ValueError:
+        return {}
+    try:
+        end = datetime.fromisoformat(event.get("ends_at") or "")
+    except ValueError:
+        end = None
+    all_day = bool(event.get("all_day"))
+    if all_day:
+        # An all-day event ends the morning after its last day, in both.
+        last = (end or start).date()
+        span = (start.date(), last + timedelta(days=1))
+    else:
+        span = (start, end if end and end > start else start + timedelta(hours=1))
+    title = event.get("title") or "Event"
+    place = event.get("place") or event.get("location") or ""
+    details = "\n".join(x for x in (
+        "Hosted by " + event["org"] if event.get("org") else "",
+        "RSVP: " + event["rsvp_url"] if event.get("rsvp_url") else "") if x)
+
+    stamp = "%Y%m%d" if all_day else "%Y%m%dT%H%M%S"
+    google = {"action": "TEMPLATE", "text": title,
+              "dates": "/".join(t.strftime(stamp) for t in span)}
+    if details:
+        google["details"] = details
+    if place:
+        google["location"] = place
+    if timezone and not all_day:
+        google["ctz"] = timezone
+
+    iso = "%Y-%m-%d" if all_day else "%Y-%m-%dT%H:%M:%S"
+    outlook = {"path": "/calendar/action/compose", "rru": "addevent",
+               "subject": title, "startdt": span[0].strftime(iso),
+               "enddt": span[1].strftime(iso)}
+    if all_day:
+        outlook["allday"] = "true"
+    if place:
+        outlook["location"] = place
+    if details:
+        outlook["body"] = details
+    encode = lambda params: urlencode(params, quote_via=quote)
+    return {"google": f"{GOOGLE_CALENDAR}?{encode(google)}",
+            "outlook": f"{OUTLOOK_CALENDAR}?{encode(outlook)}"}
+
+
 def payload(events) -> str:
     """The event data the page renders from, safe to embed in a script tag."""
+    timezone = school.active().TIMEZONE
     slim = []
     for e in events:
         slim.append({
@@ -185,6 +247,7 @@ def payload(events) -> str:
             "submitted": bool(e.get("submitted_by")),
             "verified": bool(e.get("submitted_by")),
             "rsvp": e.get("rsvp_url") or "", "flyer": e.get("flyer_src") or "",
+            "cal": calendar_links(e, timezone),
             # No raw description. The page never showed it, and 400
             # characters of email carried the reader's address, netIDs and
             # per-recipient tracking links into the published source.
@@ -395,6 +458,9 @@ h1{font-family:var(--serif);font-weight:500;font-size:clamp(34px,7.5vw,46px);
   text-decoration:underline;text-underline-offset:3px;
   text-decoration-color:var(--rule)}
 .acts a.rsvp{color:var(--net);font-weight:600}
+.acts .addcal{font-size:12.5px;color:var(--muted)}
+.tag.need.urgent{font-weight:600}
+.tag.closed{background:transparent;border-color:var(--rule);color:var(--muted)}
 .acts button:hover,.acts a:hover{color:var(--ink)}
 
 .why{margin-top:12px;padding:12px 14px;background:var(--card);
@@ -850,7 +916,13 @@ button.wide{width:100%;margin-top:18px;padding:12px}
     // nothing otherwise tells a reader there is one to check.
     if (e.flyer) out.push(["verified", "Flyer supplied"]);
     // Requirements read as warnings: they are what stops you at the door.
-    (e.notes || []).forEach(function (n) { out.push(["need", n]); });
+    // The RSVP deadline among them is worked out as the page is read, not
+    // when it was built: a page a week old must not still invite an RSVP
+    // that closed on Tuesday.
+    var deadline = rsvpTag(e);
+    (e.notes || []).forEach(function (n) {
+      out.push(deadline && /^RSVP by /.test(n) ? deadline : ["need", n]);
+    });
     if (e.submitted) {
       out.push(["posted", "Submitted"]);
       out.push(e.verified ? ["verified", "Verified \u2014 link"]
@@ -859,6 +931,22 @@ button.wide{width:100%;margin-top:18px;padding:12px}
     return out.map(function (t) {
       return '<span class="tag ' + t[0] + '">' + esc(t[1]) + "</span>";
     }).join("");
+  }
+
+  // `rsvpBy` is a date ("2026-10-16"); the deadline is the end of that day.
+  // Null leaves the note as built ("RSVP by 16 Oct").
+  function rsvpTag(e) {
+    var p = (e.rsvpBy || "").split("-");
+    if (p.length !== 3) return null;
+    var day = new Date(+p[0], +p[1] - 1, +p[2]);
+    if (isNaN(day.getTime())) return null;
+    var now = new Date();
+    var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var days = Math.round((day - today) / 86400000);
+    if (days < 0) return ["closed", "RSVP closed"];
+    if (days === 0) return ["need urgent", "RSVP by today"];
+    if (days === 1) return ["need urgent", "RSVP by tomorrow"];
+    return null;
   }
 
   function why(e) {
@@ -910,6 +998,11 @@ button.wide{width:100%;margin-top:18px;padding:12px}
           ? '<a class="rsvp" href="' + esc(e.rsvp) + '" target="_blank" '
             + 'rel="noopener noreferrer">'
             + (e.submitted ? "See proof \u2197" : "RSVP") + "</a>" : "") +
+        (e.cal && e.cal.google
+          ? '<span class="addcal">Add to <a href="' + esc(e.cal.google) +
+            '" target="_blank" rel="noopener noreferrer">Google Calendar</a> or <a href="' +
+            esc(e.cal.outlook) + '" target="_blank" rel="noopener noreferrer">Outlook</a></span>'
+          : "") +
       "</div>" + (open ? why(e) : "") + "</div></article>";
   }
 
