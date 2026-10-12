@@ -19,9 +19,11 @@ this machine. Once cached, a run costs about 50ms of process start.
 
 from __future__ import annotations
 
+import glob
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 
@@ -58,6 +60,34 @@ def _sdk_path():
     return path or None
 
 
+def _sdks() -> list:
+    """The default SDK first, then the others beside it, newest first.
+
+    Apple's Command Line Tools can carry an SDK newer than their own compiler.
+    In October 2026 the macOS 27 SDK arrived with a Swift 6.3 compiler that
+    cannot read it ("cannot suppress '~Copyable'..."), while the macOS 26
+    SDKs installed beside it still built the helper. So a failed build is
+    retried against each of them before giving up.
+    """
+    default = _sdk_path()
+    if not default:
+        return []
+
+    def version(path):
+        m = re.search(r"MacOSX([\d.]+)\.sdk$", path)
+        return tuple(int(x) for x in m.group(1).split(".") if x) if m else ()
+
+    seen, out = set(), []
+    others = sorted(glob.glob(os.path.join(os.path.dirname(default), "MacOSX*.sdk")),
+                    key=version, reverse=True)
+    for path in [default] + others:
+        real = os.path.realpath(path)
+        if real not in seen:
+            seen.add(real)
+            out.append(path)
+    return out
+
+
 def _stamp() -> str:
     """Source hash plus SDK path: either changing invalidates the binary."""
     try:
@@ -73,29 +103,34 @@ def _compile():
     if not SWIFTC:
         _state["error"] = "swiftc not found"
         return None
-    sdk = _sdk_path()
-    if not sdk:
+    sdks = _sdks()
+    if not sdks:
         _state["error"] = "no macOS SDK (xcrun --show-sdk-path failed)"
         return None
     os.makedirs(BIN_DIR, exist_ok=True)
     tmp = BIN_PATH + ".part"
-    try:
-        result = subprocess.run(
-            [SWIFTC, "-O", "-sdk", sdk, "-suppress-warnings", HELPER_SRC,
-             "-o", tmp],
-            capture_output=True, text=True, timeout=COMPILE_TIMEOUT, check=False)
-    except subprocess.TimeoutExpired:
-        _state["error"] = "swiftc timed out"
-        return None
-    except (OSError, subprocess.SubprocessError) as exc:
-        _state["error"] = f"swiftc failed: {type(exc).__name__}"
-        return None
-    if result.returncode != 0 or not os.path.exists(tmp):
-        _state["error"] = (result.stderr or "swiftc failed").strip()[:400]
+    first_error = None
+    for sdk in sdks:
+        try:
+            result = subprocess.run(
+                [SWIFTC, "-O", "-sdk", sdk, "-suppress-warnings", HELPER_SRC,
+                 "-o", tmp],
+                capture_output=True, text=True, timeout=COMPILE_TIMEOUT, check=False)
+        except subprocess.TimeoutExpired:
+            first_error = first_error or "swiftc timed out"
+            continue
+        except (OSError, subprocess.SubprocessError) as exc:
+            first_error = first_error or f"swiftc failed: {type(exc).__name__}"
+            continue
+        if result.returncode == 0 and os.path.exists(tmp):
+            break
+        first_error = first_error or (result.stderr or "swiftc failed").strip()[:400]
         try:
             os.remove(tmp)
         except OSError:
             pass
+    else:
+        _state["error"] = first_error
         return None
     # Atomic, so a concurrent run never sees a half-written binary.
     os.replace(tmp, BIN_PATH)
@@ -127,8 +162,15 @@ def binary(refresh: bool = False):
         _state["binary"] = BIN_PATH
         return BIN_PATH
 
-    _state["binary"] = _compile()
-    return _state["binary"]
+    built = _compile()
+    if built is None and have.split(":")[0] == want.split(":")[0] \
+            and os.path.exists(BIN_PATH) and os.access(BIN_PATH, os.X_OK):
+        # Only the SDK moved, and nothing installed could rebuild against it.
+        # The helper on disk was built from this exact source and still runs,
+        # so keep it rather than lose every flyer to a toolchain update.
+        built = BIN_PATH
+    _state["binary"] = built
+    return built
 
 
 def available() -> bool:

@@ -169,6 +169,79 @@ class TestUnavailable(unittest.TestCase):
             self.assertIn("swiftc", reading["error"])
 
 
+class TestAToolchainUpdate(unittest.TestCase):
+    """October 2026: a macOS 27 SDK arrived with a compiler that cannot read
+    it. The helper built a month earlier still ran, but its stamp named the
+    old SDK, so it was thrown away and every flyer failed. Older SDKs sat
+    beside the new one the whole time."""
+
+    def setUp(self):
+        import tempfile
+        from unittest import mock
+        root = tempfile.mkdtemp()
+        sdks = os.path.join(root, "SDKs")
+        os.makedirs(sdks)
+        for name in ("MacOSX27.0.sdk", "MacOSX26.5.sdk", "MacOSX15.4.sdk"):
+            os.makedirs(os.path.join(sdks, name))
+        os.symlink(os.path.join(sdks, "MacOSX26.5.sdk"), os.path.join(sdks, "MacOSX26.sdk"))
+        os.symlink(os.path.join(sdks, "MacOSX27.0.sdk"), os.path.join(sdks, "MacOSX.sdk"))
+        self.sdks = sdks
+        self.default = os.path.join(sdks, "MacOSX27.0.sdk")
+        bin_dir = os.path.join(root, "bin")
+        patches = [mock.patch.object(ocr, "BIN_DIR", bin_dir),
+                   mock.patch.object(ocr, "BIN_PATH", os.path.join(bin_dir, "flyer_ocr")),
+                   mock.patch.object(ocr, "STAMP_PATH", os.path.join(bin_dir, "flyer_ocr.stamp")),
+                   mock.patch.object(ocr, "SWIFTC", "/usr/bin/swiftc"),
+                   mock.patch.object(ocr, "_sdk_path", lambda: self.default),
+                   mock.patch.object(ocr.subprocess, "run", self.fake_swiftc),
+                   mock.patch.dict(ocr._state, {"checked": False, "binary": None, "error": None})]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        self.builds = []
+        self.working = ("26.5",)
+
+    def fake_swiftc(self, args, **kwargs):
+        import subprocess
+        sdk = args[args.index("-sdk") + 1]
+        self.builds.append(os.path.basename(sdk))
+        if any(v in sdk for v in self.working):
+            with open(args[args.index("-o") + 1], "w") as fh:
+                fh.write("#!/bin/sh\n")
+            return subprocess.CompletedProcess(args, 0, "", "")
+        return subprocess.CompletedProcess(
+            args, 1, "", "error: cannot suppress '~Copyable' on generic parameter")
+
+    def keep(self, stamp):
+        os.makedirs(ocr.BIN_DIR, exist_ok=True)
+        with open(ocr.BIN_PATH, "w") as fh:
+            fh.write("#!/bin/sh\n")
+        os.chmod(ocr.BIN_PATH, 0o755)
+        with open(ocr.STAMP_PATH, "w") as fh:
+            fh.write(stamp)
+
+    def test_the_default_sdk_first_then_the_rest_newest_first(self):
+        names = [os.path.basename(p) for p in ocr._sdks()]
+        self.assertEqual(names, ["MacOSX27.0.sdk", "MacOSX26.5.sdk", "MacOSX15.4.sdk"])
+
+    def test_a_failed_build_is_retried_against_an_older_sdk(self):
+        self.assertEqual(ocr.binary(refresh=True), ocr.BIN_PATH)
+        self.assertEqual(self.builds, ["MacOSX27.0.sdk", "MacOSX26.5.sdk"])
+        with open(ocr.STAMP_PATH) as fh:
+            self.assertEqual(fh.read(), ocr._stamp())
+
+    def test_a_helper_from_this_source_survives_an_sdk_nothing_can_build(self):
+        self.working = ()
+        self.keep(ocr._stamp().split(":")[0] + ":/an/older/MacOSX.sdk")
+        self.assertEqual(ocr.binary(refresh=True), ocr.BIN_PATH)
+
+    def test_but_not_one_built_from_other_source(self):
+        self.working = ()
+        self.keep("0" * 64 + ":/an/older/MacOSX.sdk")
+        self.assertIsNone(ocr.binary(refresh=True))
+        self.assertIn("Copyable", ocr.last_error())
+
+
 class TestDoctor(unittest.TestCase):
     def test_reports_without_raising(self):
         info = ocr.doctor()
