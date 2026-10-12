@@ -1,0 +1,42 @@
+{
+  "_comment": "Copy to data/config.json, which git ignores. Every key but school is optional.",
+
+  "school": "",
+  "_comment_school": "A profile from schools/, e.g. georgetown_law. Empty: mail is refused unless you allow a sender by hand.",
+
+  "horizon_days": 30,
+
+  "mail": {
+    "maildrop": "data/maildrop"
+  },
+
+  "_comment_sources": "Senders and mailing lists to read beyond what your school's profile knows. Add them with ./fff sources, or here.",
+  "sources": {
+    "senders": [],
+    "lists": {}
+  },
+
+  "_comment_page": "Your own words at the top of the page. about names an HTML file; git ignores data/about.html.",
+  "page": {
+    "title": "Free Food Finder",
+    "standfirst": "",
+    "about": ""
+  },
+
+  "_comment_artifact": "Where the routine republishes the page, if you publish it as a Claude Artifact.",
+  "artifact_url": "",
+
+  "_comment_orgs": "Org pages with schema.org event data, read on every refresh.",
+  "orgs": [],
+
+  "_comment_imap": "Only if your school allows IMAP app passwords. No password goes in this file: store it in the macOS Keychain (see ingest/mail.py) and name the service here.",
+  "imap_example": {
+    "host": "imap.gmail.com",
+    "port": 993,
+    "user": "you@example.edu",
+    "keychain_service": "free-food-finder",
+    "password_env": "FFF_IMAP_PASSWORD",
+    "folders": ["INBOX"],
+    "since_days": 14
+  }
+}

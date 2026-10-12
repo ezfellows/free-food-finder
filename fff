@@ -1,0 +1,360 @@
+#!/bin/bash
+# Free Food Finder launcher.
+set -euo pipefail
+cd "$(dirname "$0")"
+PY=$(command -v python3)
+
+case "${1:-help}" in
+  refresh) exec "$PY" -c "import json, docket; print(json.dumps(docket.refresh(), indent=1))" ;;
+  ingest)  exec "$PY" ingest/livewhale.py "${2:-30}" ;;
+  mail)    exec "$PY" ingest/mail.py ;;
+  # The Gmail searches that fill data/maildrop/, built from senders.py's rules.
+  # --select FILE says which search results to fetch; --done records a pull.
+  mailquery) shift; exec "$PY" mailquery.py "$@" ;;
+  maillog) shift; exec "$PY" maillog.py "$@" ;;
+  # Senders and mailing lists you have chosen to read events from.
+  sources) shift; exec "$PY" sources.py "$@" ;;
+  # The second argument is the currently published page. Student submissions
+  # live inside it -- the page republishes itself when someone posts -- so a
+  # rebuild that does not read it back wipes every post.
+  build)   exec "$PY" publish.py "${2:-data/page.html}" "${3:-data/live.html}" ;;
+  ics)     exec "$PY" -c "import docket, store; print(docket.build_ics(store.connect()))" ;;
+  test)    exec "$PY" -m unittest discover -s tests -t . -v ;;
+  next)
+    exec "$PY" - <<'PYEOF'
+import docket, store
+# The page's own selection, campus rules and all, so the terminal and the
+# page never disagree about what is on.
+rows = docket.build_events(store.connect(), days=21, min_tier="likely", mode="food")
+if not rows:
+    print("No free food found on campus in the next 3 weeks.")
+for e in rows[:12]:
+    meals = ",".join(e["meals"]) or "food"
+    print(f"{e['when']:>14}  {meals:<16} {e['title'][:42]:<42} "
+          f"{(e['place'] or '?')[:24]:<24} {e['source_label']}")
+PYEOF
+    ;;
+  school)
+    exec "$PY" - <<'PYEOF'
+import school
+p = school.active()
+if not p.configured:
+    print("No school profile chosen. Mail is refused unless you add its sender or list with ./fff sources.")
+    print('Choose one in data/config.json: {"school": "<name>"}, from schools/.')
+else:
+    print(f"{p.NAME or p.id} ({p.id})" + (f", {p.CAMPUS}" if p.CAMPUS else ""))
+    print("  mail domains:      " + (", ".join(p.DOMAINS) or "none"))
+    print("  broadcast systems: " + (", ".join(p.BROADCAST_DOMAINS) or "none"))
+    print("  person's address:  " + (f"local part matches /{p.PERSON}/" if p.PERSON else "every address"))
+    print("  law firm mail:     " + ("yes" if p.LAW_FIRM_MAIL else "no"))
+    flyers = p.FLYERS or {}
+    print("  flyer newsletter:  " + (flyers.get("label") or "none"))
+    if flyers:
+        print("    from:            " + ", ".join(flyers.get("senders", ())))
+        print("    subjects with:   " + ", ".join(repr(x) for x in flyers.get("subjects", ())))
+    print("  calendar:          " + (p.CALENDAR or "none"))
+    print(f"  buildings:         {len(p.VENUES)}")
+PYEOF
+    ;;
+  broadcast)
+    # Read an OSL Weekly Broadcast: fetch its flyers, OCR them, make events.
+    [ -z "${2:-}" ] && { echo "usage: ./fff broadcast <email.eml> [limit]"; exit 1; }
+    if [ -n "${3:-}" ]; then exec "$PY" ingest/broadcast.py "$2" "$3"; fi
+    exec "$PY" ingest/broadcast.py "$2"
+    ;;
+  flyers)
+    case "${2:-doctor}" in
+      doctor)
+        exec "$PY" - <<'PYEOF'
+import os, ocr, store, flyers
+info = ocr.doctor()
+print("vision")
+for k in ("swiftc", "sdk", "binary", "available", "error"):
+    print(f"  {k:10s} {info.get(k)}")
+print(f"  sips       {flyers.SIPS}")
+conn = store.connect()
+c = flyers.counts(conn)
+print(f"\nflyers: {c['total']}")
+print(f"  by kind    {c['by_kind']}")
+print(f"  by read    {c['by_read']}")
+print(f"  queued     {c['queued']}")
+used = 0
+for root, _, names in os.walk(flyers.FLYER_DIR):
+    used += sum(os.path.getsize(os.path.join(root, n)) for n in names)
+print(f"  disk       {used/1024/1024:.1f} MB")
+PYEOF
+        ;;
+      pending)
+        exec "$PY" - <<'PYEOF'
+import json, store
+from ingest.broadcast import pending
+print(json.dumps(pending(store.connect(), limit=25), indent=1))
+PYEOF
+        ;;
+      apply)
+        # Reads the review pass's JSON array on stdin, or from a file.
+        # The program goes in via -c, NOT a heredoc: a heredoc *is* stdin,
+        # so feeding the script that way leaves nothing for the JSON to
+        # arrive on and every run reads an empty document.
+        exec "$PY" -c '
+import json, sys, store
+from ingest.broadcast import apply_readings
+src = open(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1] else sys.stdin
+try:
+    readings = json.load(src)
+except ValueError as exc:
+    print("expected a JSON array of readings: %s" % exc); sys.exit(1)
+print(json.dumps(apply_readings(store.connect(), readings), indent=1))
+' "${3:-}"
+        ;;
+      *) echo "usage: ./fff flyers [doctor|pending|apply]"; exit 1 ;;
+    esac
+    ;;
+  posts)
+    # Student submissions: what is pending, what the evidence says, and the
+    # verdict. The posts themselves live inside the published page.
+    exec "$PY" -c '
+import sys, json, posts, store
+from network import annotate, worth_storing
+conn = store.connect()
+live = "data/live.html"
+action = sys.argv[1] if len(sys.argv) > 1 else "pending"
+found = posts.read_posts(live)
+seen = store.submission_verdicts(conn)
+
+if action in ("verify", "reject"):
+    post_id = sys.argv[2]
+    reason = sys.argv[3] if len(sys.argv) > 3 else ""
+    match = [p for p in found if str(p.get("id")) == post_id]
+    if not match:
+        print("no such post: %s" % post_id); raise SystemExit(1)
+    post = match[0]
+    if action == "reject":
+        store.note_submission(conn, post, "rejected", reason or "rejected by hand")
+        print("rejected: %s" % (post.get("title") or "")[:50]); raise SystemExit
+    checked = posts.check(post, conn)
+    event = posts.as_event(post, checked)
+    event.update(annotate(event["title"], event["description"],
+                          event["location"], ""))
+    store.upsert(conn, event)
+    store.note_submission(conn, post, "verified", reason or "; ".join(checked["good"]),
+                          event["id"])
+    print("verified and promoted: %s" % event["title"][:50])
+    raise SystemExit
+
+pending = [p for p in found if str(p.get("id")) not in seen]
+print("%d submission(s) on the page, %d not yet checked" % (len(found), len(pending)))
+for post in (found if action == "all" else pending):
+    row = seen.get(str(post.get("id")))
+    checked = posts.check(post, conn)
+    mark = {"ok": "+", "doubtful": "?", "bad": "-"}[checked["verdict"]]
+    print("\n %s %s  [%s]" % (mark, (post.get("title") or "")[:46], post.get("id")))
+    print("     by %s - %s - %s" % (post.get("by") or "?", post.get("start") or "?",
+                                    post.get("place") or "no room"))
+    if row and row["verdict"]:
+        print("     already %s: %s" % (row["verdict"], (row["reason"] or "")[:50]))
+    for g in checked["good"]:   print("     + %s" % g)
+    for d in checked["doubts"]: print("     ? %s" % d)
+    for b in checked["bad"]:    print("     - %s" % b)
+    if not (row and row["verdict"]):
+        print("     ./fff posts verify %s   |   ./fff posts reject %s \"why\""
+              % (post.get("id"), post.get("id")))
+' "${2:-pending}" "${3:-}" "${4:-}"
+    ;;
+  senders)
+    # The register of every address the ingester has seen, and why.
+    exec "$PY" -c '
+import sys, store
+conn = store.connect()
+action = sys.argv[1] if len(sys.argv) > 1 else "list"
+if action in ("allow", "deny", "clear"):
+    address = sys.argv[2]
+    store.set_sender_verdict(conn, address, "" if action == "clear" else action)
+    print("%s: %s" % (address, action))
+    raise SystemExit
+rows = store.known_senders(conn, only_refused=(action == "--unknown"))
+if not rows:
+    total = conn.execute("SELECT COUNT(*) FROM senders").fetchone()[0]
+    print("nothing refused -- %d senders recorded" % total if total
+          else "no senders recorded yet -- run an ingest first")
+for r in rows:
+    mark = {"allow": "+", "deny": "-"}.get(r["verdict"] or "", " ")
+    print("%s %-42s %3d msgs  bulk:%-3s listserv:%s" % (
+        mark, r["address"], r["messages"],
+        "yes" if r["bulk_seen"] else "no", "yes" if r["listserv_seen"] else "no"))
+    if r["org_name"] and " " in r["org_name"]:
+        print("      known as: %s" % r["org_name"])
+    if r["last_reason"]:
+        print("      -> %s" % r["last_reason"])
+    refused = "from a" not in (r["last_reason"] or "")
+    if refused and not (r["verdict"] or ""):
+        print("         read it with: ./fff sources add %s" % r["address"])
+' "${2:-list}" "${3:-}"
+    ;;
+  vet)
+    # Sweep everything already stored for anything written to one reader.
+    exec "$PY" -c '
+import personal, store
+conn = store.connect()
+rows = conn.execute("SELECT id, title, description, org, location, source FROM events").fetchall()
+# An event that arrived through a broadcast, a listserv or the public
+# calendar IS bulk, and exclusivity wording on it describes a restricted
+# event rather than a private invitation. Sweeping with bulk=False flagged
+# five real events for saying "reserve your spot".
+BULK_SOURCES = ("broadcast", "livewhale", "mail", "orgs")
+flagged = []
+for r in rows:
+    blob = " ".join(str(r[k] or "") for k in ("title", "description", "org", "location"))
+    bulk = (r["source"] or "") in BULK_SOURCES
+    verdict = personal.assess_text(blob, bulk=bulk)
+    if verdict["personal"]:
+        flagged.append((r["title"], verdict["reason"]))
+print("%d events scanned" % len(rows))
+for title, reason in flagged:
+    print("  FLAG %-46s %s" % (title[:46], reason))
+if not flagged:
+    print("  nothing written to one reader")
+'
+    ;;
+  reground)
+    # Re-apply the captions already on file to the events they describe.
+    exec "$PY" -c '
+import json, store
+from ingest.broadcast import reground
+print(json.dumps(reground(store.connect()), indent=1))
+'
+    ;;
+  titles)
+    # Every published title that does not read like a title, and why.
+    exec "$PY" - <<'PYEOF'
+import store, docket, titles
+conn = store.connect()
+events = docket.build_events(conn, days=60, min_tier="possible")
+bad = titles.suspicious(events)
+if not bad:
+    print(f"all {len(events)} titles read cleanly")
+for event, verdict in bad:
+    print(f"\n  {event['title']}")
+    print(f"    source: {event.get('source', '?')}"
+          + (f"   flyer: {event['flyer_url']}" if event.get("flyer_url") else ""))
+    for issue in verdict["issues"]:
+        print(f"    - {issue}")
+    if verdict["clean"] != event["title"]:
+        print(f"    suggested: {verdict['clean']}")
+print(f"\n{len(bad)} of {len(events)} titles flagged")
+PYEOF
+    ;;
+  times)
+    # Every event whose clock is worth a second look: the flyer graphic, the
+    # email text and what is published, side by side.
+    exec "$PY" - <<'PYEOF'
+import store, docket, timing
+conn = store.connect()
+events = docket.build_events(conn, days=60, min_tier="possible")
+flagged = timing.sweep(conn, events)
+
+for a in flagged:
+    print("\n  %s" % a["title"][:66])
+    print("    published: %s" % a["span"])
+    if a["flyer"]["start"]:
+        print("    flyer    : %s" % timing._span(a["flyer"]["start"], a["flyer"]["end"]))
+    if a["caption"]["start"]:
+        print("    email    : %s" % timing._span(a["caption"]["start"], a["caption"]["end"]))
+    for issue in a["issues"]:
+        print("    - %s" % issue)
+    for note in a["notes"]:
+        print("    . %s" % note)
+    if a["ruled"]:
+        print("    ruled by hand: %s" % ", ".join(a["ruled"]))
+    elif a["issues"]:
+        print("    ./fff correct %s starts_at \"<ISO>\" \"<why>\"" % a["id"])
+
+disputed = [a for a in flagged if a["issues"]]
+print("\n%d of %d events flagged, %d with sources that disagree"
+      % (len(flagged), len(events), len(disputed)))
+PYEOF
+    ;;
+  add)
+    # Events read out of mail by hand -- a newsletter entry the splitter
+    # missed -- recorded and scored exactly like everything else. The reading
+    # is the reviewer's; the food and networking verdicts are the code's.
+    # The program goes in via -c, not a heredoc: a heredoc *is* stdin.
+    exec "$PY" -c '
+import json, sys, store
+from score import score_event
+from network import score_network
+if len(sys.argv) < 2 or not sys.argv[1]:
+    print("usage: ./fff add <events.json>"); sys.exit(1)
+events = json.load(open(sys.argv[1]))
+conn = store.connect()
+for ev in events:
+    missing = [k for k in ("title", "starts_at", "org") if not ev.get(k)]
+    if missing:
+        print("  skipped (missing %s): %r" % (", ".join(missing), ev.get("title")))
+        continue
+    text = ev.get("description") or ""
+    where = ev.get("location") or ""
+    food = score_event(title=ev["title"], description=text, location=where)
+    net = score_network(title=ev["title"], description=text, location=where,
+                        org=ev["org"])
+    row = {"title": ev["title"], "starts_at": ev["starts_at"],
+           "ends_at": ev.get("ends_at"), "location": where, "org": ev["org"],
+           "description": text, "source": "mail", "all_day": False,
+           "date_confidence": 95}
+    row.update({k: food[k] for k in ("venue_class", "confidence", "tier",
+                "has_food", "meals", "reason", "signals", "rsvp_required",
+                "restricted")})
+    row.update({k: net[k] for k in ("network_score", "network_kind", "firms",
+                "practice_areas", "network_reason")})
+    print("  %-8s %s  %-40s food=%-9s net=%s" % (
+        store.upsert(conn, row), ev["starts_at"][:16], ev["title"][:40],
+        food["tier"], net["network_kind"]))
+conn.commit()
+' "${2:-}"
+    ;;
+  correct)
+    # A human ruling on one field, which outranks both the caption and the
+    # flyer and survives every later pass.
+    exec "$PY" - "$@" <<'PYEOF'
+import sys, store
+conn = store.connect()
+args = sys.argv[2:]
+
+if not args or args[0] == "--list":
+    rows = conn.execute(
+        "SELECT c.*, e.title FROM corrections c "
+        "LEFT JOIN events e ON e.id = c.event_id ORDER BY c.at DESC").fetchall()
+    if not rows:
+        print("no corrections on record")
+    for r in rows:
+        print("  %s  %s = %s" % (r["event_id"], r["field"], r["value"]))
+        print("      %s" % ((r["title"] or "(event since gone)")[:60]))
+        if r["why"]:
+            print("      %s" % r["why"][:70])
+    raise SystemExit
+
+if len(args) < 3:
+    print("usage: ./fff correct <event-id> <field> <value> [why]")
+    print("       ./fff correct --list")
+    print("fields: %s" % ", ".join(store.CORRECTABLE))
+    raise SystemExit(1)
+
+event_id, field, value = args[0], args[1], args[2]
+why = args[3] if len(args) > 3 else ""
+event = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
+if event is None:
+    print("no such event: %s" % event_id); raise SystemExit(1)
+was = event[field] if field in store.CORRECTABLE else None
+try:
+    store.record_correction(conn, event_id, field, value, why)
+except ValueError as exc:
+    print(exc); raise SystemExit(1)
+print("%s" % (event["title"] or "")[:60])
+print("  %s: %s -> %s" % (field, was or "(empty)", value))
+print("  recorded; later passes will not overwrite it")
+PYEOF
+    ;;
+  help|-h|--help)
+    echo "usage: ./fff [refresh|build|ingest|mail|mailquery|maillog|sources|broadcast|flyers|titles|posts|senders|vet|reground|times|add|correct|ics|next|school|test]" ;;
+  *) echo "usage: ./fff [refresh|build|ingest|mail|mailquery|maillog|sources|broadcast|flyers|titles|posts|senders|vet|reground|times|add|correct|ics|next|school|test]"; exit 1 ;;
+esac

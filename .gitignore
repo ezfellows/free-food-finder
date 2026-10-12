@@ -1,0 +1,17 @@
+data/*.db
+data/config.json
+data/*.log
+data/maildrop/
+__pycache__/
+*.pyc
+.DS_Store
+data/flyers/
+data/bin/
+data/preview/
+data/page.html
+data/page-files.json
+data/*.ics
+data/live.html
+data/mail-pull.json
+# Your own introduction for the page (see data/config.example.json).
+data/about.html
