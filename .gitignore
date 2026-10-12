@@ -1,17 +1,12 @@
-data/*.db
-data/config.json
-data/*.log
-data/maildrop/
+# Everything in data/ is yours -- your mail, your event log, your settings, the
+# page built from them -- except the three files the project ships. Listing
+# what to keep rather than what to hide means a new file there is private by
+# default.
+data/*
+!data/.gitkeep
+!data/firms.json
+!data/config.example.json
+
 __pycache__/
 *.pyc
 .DS_Store
-data/flyers/
-data/bin/
-data/preview/
-data/page.html
-data/page-files.json
-data/*.ics
-data/live.html
-data/mail-pull.json
-# Your own introduction for the page (see data/config.example.json).
-data/about.html
