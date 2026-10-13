@@ -237,7 +237,7 @@ def _clean(text: str) -> str:
                  ("&rsquo;", "'"), ("&lsquo;", "'"), ("&quot;", '"'), ("&#39;", "'"),
                  ("&ldquo;", '"'), ("&rdquo;", '"'), ("&mdash;", "-"), ("&ndash;", "-")):
         text = text.replace(a, b)
-    text = text.replace("\\,", ",").replace("\;", ";").replace("\\n", " ").replace("\\\\", "")
+    text = text.replace("\\,", ",").replace("\\;", ";").replace("\\n", " ").replace("\\\\", "")
     return re.sub(r"\s+", " ", text).strip()
 
 

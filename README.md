@@ -1,5 +1,7 @@
 # Free Food Finder
 
+[![Tests](https://github.com/ezfellows/free-food-finder/actions/workflows/tests.yml/badge.svg)](https://github.com/ezfellows/free-food-finder/actions/workflows/tests.yml)
+
 **Scan your school inbox for events with free food or people worth meeting,
 and log them in one place.**
 
@@ -256,7 +258,7 @@ publish.py      the page
 mailquery.py    the Gmail searches; maillog.py what came of them
 ingest/         mail, broadcast (flyers), livewhale (calendar), orgs (web pages)
 routine/        the scheduled task for Claude
-tests/          run with ./fff test
+tests/          run with ./fff test; GitHub runs them on every push
 ```
 
 ## Limits
@@ -276,8 +278,9 @@ tests/          run with ./fff test
 
 A profile for your school is the most useful thing you can send back: open a
 pull request with `schools/your_school.py`, and say in a comment what each rule
-is for. Run `./fff test` first. Any test you add must use made-up names and
-addresses — never a real person's.
+is for. Run `./fff test` first; GitHub runs the same tests on every push and
+pull request, on Linux and on a Mac. Any test you add must use made-up names
+and addresses — never a real person's.
 
 ## License
 
