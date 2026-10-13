@@ -24,6 +24,14 @@ can keep to yourself or share with your class. It was built at Georgetown Law;
 everything it knows about Georgetown lives in one file, and a short profile
 teaches it your school.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+  <img src="docs/screenshot-light.png" width="640" alt="The web page: five upcoming events, each tagged for its food and its networking, with the law firms attending named and links to add each one to Google Calendar or Outlook.">
+</picture>
+
+*The page, built from the made-up announcements in [`samples/`](samples/) by
+[`tools/screenshot.py`](tools/screenshot.py).*
+
 ## Status
 
 A work in progress, in daily use at Georgetown Law since September 2026.
@@ -258,6 +266,7 @@ publish.py      the page
 mailquery.py    the Gmail searches; maillog.py what came of them
 ingest/         mail, broadcast (flyers), livewhale (calendar), orgs (web pages)
 routine/        the scheduled task for Claude
+tools/          the flyer reader's Swift source; make_eml.py, screenshot.py
 tests/          run with ./fff test; GitHub runs them on every push
 ```
 
