@@ -56,6 +56,7 @@ class Maildrop:
 class Reread(unittest.TestCase):
     def setUp(self):
         self.conn = store.connect(os.path.join(tempfile.mkdtemp(), "r.db"))
+        self.addCleanup(self.conn.close)
 
     def list(self, *events):
         """What the calendar or a flyer already has."""

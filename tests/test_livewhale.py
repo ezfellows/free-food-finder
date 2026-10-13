@@ -8,6 +8,7 @@ No test here waits or touches the network: the server and the clock are both
 stand-ins, and time passes only when the code under test spends it.
 """
 import http.client
+import io
 import os
 import socket
 import sys
@@ -37,8 +38,9 @@ SILENT = "silent"
 
 
 def http_error(code):
+    # With a body, as a server's has, so that it can be closed afterwards.
     return urllib.error.HTTPError("https://calendar.example.edu/feed.ics",
-                                  code, "", {}, None)
+                                  code, "", {}, io.BytesIO(b""))
 
 
 class Server:
@@ -49,6 +51,7 @@ class Server:
     """
 
     def __init__(self, *answers):
+        self.script = answers
         self.answers = list(answers)
         self.now = 0.0
         self.waits = []          # how long each request was prepared to wait
@@ -85,6 +88,11 @@ class Server:
     def __exit__(self, *exc):
         for patch in self.patches:
             patch.stop()
+        # Python 3.12 and later warn about an HTTP error whose response was
+        # never closed.
+        for answer in self.script:
+            if isinstance(answer, urllib.error.HTTPError):
+                answer.close()
 
 
 class TestAskingAgain(unittest.TestCase):
@@ -150,6 +158,7 @@ class TestTheRoutinesTwoMinutes(unittest.TestCase):
 class TestTheRefresh(unittest.TestCase):
     def setUp(self):
         self.conn = store.connect(os.path.join(tempfile.mkdtemp(), "c.db"))
+        self.addCleanup(self.conn.close)
 
     def logged(self):
         return self.conn.execute(
@@ -166,8 +175,9 @@ class TestTheRefresh(unittest.TestCase):
         its summary says when the calendar still fails."""
         with Server(SILENT, SILENT):
             stats = livewhale.run(self.conn, days=35)
-        self.assertEqual(stats["error"], "timeout: The read operation timed out "
-                                         "(gave up after 2 attempts)")
+        # The error is "timeout" before Python 3.10 and "TimeoutError" after.
+        self.assertEqual(stats["error"], f"{socket.timeout.__name__}: The read "
+                                         "operation timed out (gave up after 2 attempts)")
         self.assertEqual(tuple(self.logged()), (0, 0, stats["error"]))
 
     def test_a_download_cut_short_does_not_end_the_refresh(self):
