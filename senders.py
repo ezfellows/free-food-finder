@@ -217,12 +217,19 @@ def to_a_listserv(msg) -> bool:
             or sources.list_for(msg) is not None)
 
 
+# The one refusal that is about the address alone: nothing in the message
+# kept it out. `./fff sources` offers senders refused for it as candidates.
+NOT_RECOGNISED = "sender is not a recognised organisation"
+
+
 def classify(msg, body: str = "", verdict: str = "") -> dict:
     """Whether this message may be read for public events, and why.
 
     Returns `{"allow", "reason", "sender", "org"}`. `reason` is written to be
     read in an audit: the point of the register is that a human can see why
-    something was let in or kept out without re-deriving it.
+    something was let in or kept out without re-deriving it. A reason for
+    letting mail in always begins "from", and a reason for keeping it out
+    never does; the register tells the two apart by it.
 
     `verdict` is a standing decision for this address: "allow" for a sender
     you added with `./fff sources add`, "deny" for one refused with
@@ -281,7 +288,7 @@ def classify(msg, body: str = "", verdict: str = "") -> dict:
 
     if not (broadcast or listserv or is_school(sender) or verdict == "allow"):
         return {"allow": False, "sender": sender, "org": "",
-                "reason": "sender is not a recognised organisation"}
+                "reason": NOT_RECOGNISED}
 
     # A reply or a calendar invite is a conversation with this reader even
     # when the other end is an office.

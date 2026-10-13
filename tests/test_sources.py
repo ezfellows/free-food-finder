@@ -7,6 +7,8 @@ whoever wrote it, and credited to the list, never to the classmate who sent
 it. And an ID number, a callback interview or a calendar invitation keeps a
 message off the page however trusted its source.
 """
+import contextlib
+import io
 import json
 import os
 import subprocess
@@ -244,6 +246,47 @@ class TestTheSettings(unittest.TestCase):
         self.assertEqual(run("add", "nonsense").returncode, 2)
         self.assertIn("removed", run("remove", LIST).stdout)
         self.assertEqual(self.saved()["sources"]["lists"], {})
+
+
+class TestCandidatesToAdd(unittest.TestCase):
+    """`./fff sources` offers the senders refused for who they are, only.
+
+    It listed every law firm the vetting had let in as refused: a firm is let
+    in "from" the firm's own name, and the test for a refusal looked for
+    "from a". And it offered senders refused for what they wrote, where adding
+    the sender is no answer.
+    """
+
+    def setUp(self):
+        context = sources.using()
+        context.__enter__()
+        self.addCleanup(context.__exit__, None, None, None)
+        self.conn = store.connect(os.path.join(tempfile.mkdtemp(), "c.db"))
+        self.addCleanup(self.conn.close)
+        for address, reason in (
+                ("recruiting@halepartners.example.com", "from Hale & Partners"),
+                ("events@lawschool.example.edu", "from an organisation address"),
+                ("news@clubs.example.org", senders.NOT_RECOGNISED),
+                ("registrar@lawschool.example.edu",
+                 "written to one reader ('you have registered for')"),
+                ("recruit@otherfirm.example.com",
+                 "Other Firm LLP writing to one reader, not the class")):
+            store.note_sender(self.conn, address, bulk=True, reason=reason)
+
+    def test_a_firm_let_in_is_not_counted_as_refused(self):
+        refused = {r["address"] for r in store.known_senders(self.conn, only_refused=True)}
+        self.assertEqual(refused, {"news@clubs.example.org",
+                                   "registrar@lawschool.example.edu",
+                                   "recruit@otherfirm.example.com"})
+
+    def test_only_a_sender_refused_for_its_address_is_offered(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            sources.show(self.conn)
+        offered = out.getvalue().split("Refused lately", 1)[1]
+        self.assertIn("news@clubs.example.org", offered)
+        for kept_out in ("halepartners", "registrar@", "otherfirm"):
+            self.assertNotIn(kept_out, offered)
 
 
 if __name__ == "__main__":

@@ -619,9 +619,12 @@ def known_senders(conn, only_refused=False) -> list:
         "SELECT * FROM senders ORDER BY messages DESC, address").fetchall()
     if not only_refused:
         return rows
+    # Mail let in is "from" somewhere: "from a broadcast system", and for a
+    # firm, "from Weil, Gotshal & Manges". Testing for "from a" missed the
+    # firms, and listed every firm the vetting had let in as refused.
     return [r for r in rows
             if (r["verdict"] or "") != "allow"
-            and "from a" not in (r["last_reason"] or "")]
+            and not (r["last_reason"] or "").startswith("from ")]
 
 
 def note_submission(conn, post: dict, verdict: str = "", reason: str = "",

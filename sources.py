@@ -233,8 +233,12 @@ def show(conn) -> None:
         print("  none")
     # What the vetting turned away that still looks like an announcement: it
     # carried bulk markers, but its address meant nothing to the profile.
+    # Mail refused for what it said -- a registration confirmation, a firm
+    # writing to one reader -- is no candidate: its sender is known, and what
+    # it wrote is what kept it out.
     maybe = [r for r in store.known_senders(conn, only_refused=True)
              if r["bulk_seen"] and not r["verdict"]
+             and r["last_reason"] == senders.NOT_RECOGNISED
              and not senders.looks_personal(r["address"])][:8]
     if maybe:
         print("\nRefused lately, though they mail like organisations. "
