@@ -2,8 +2,13 @@
 
 [![Tests](https://github.com/ezfellows/free-food-finder/actions/workflows/tests.yml/badge.svg)](https://github.com/ezfellows/free-food-finder/actions/workflows/tests.yml)
 
-**Scan your school inbox for events with free food or people worth meeting,
-and log them in one place.**
+My peer advisor once told me that the most valuable thing a 1L gets from
+events is the free food. I think all students understand the pain of the
+budget book in one way or another, and this tool is here to make sure you're
+always up to date on free meal opportunities, whether from school, student
+org, or law firm events sent to your inbox. For best results, subscribe to
+every listserv you can. Once you set up your FFF, you can easily share it with
+your peers.
 
 Student orgs, the career office, the dean's office and law firms announce a
 dozen events a day, scattered across newsletters, flyers and the university
