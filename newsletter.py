@@ -351,6 +351,50 @@ def _rescue_from_prose(title: str, ref=None) -> str:
     return fixed
 
 
+# "Bible Study This Week Our weekly Bible Study will begin next Wednesday,
+# October 14": the CLS weekly newsletter of 13 Oct 2026 sets each heading in
+# the same table cell as its first sentence, and the plain text runs the two
+# together. Read whole it is a sentence the title checks rightly refuse --
+# "this week" is how a newsletter names itself -- and the entry was dropped.
+# But a "this week" or a "tonight" is where such a heading ends: the words in
+# front of it are the event's name, and the date already says when.
+WHEN_WORDS = re.compile(
+    r"\s(?:this\s+week(?:end)?|next\s+week|tonight|today|tomorrow)\b", re.I)
+
+# Words a heading has no use for and a sentence can hardly do without.
+SENTENCE_WORDS = frozenset({"i", "we", "you", "us", "our", "your", "their",
+                            "is", "are", "was", "will", "be", "been", "please"})
+
+
+def _heading_ended_by_when(body, begins, position, following, ref=None):
+    """(name, detail) for an entry whose heading ends at its "this week".
+
+    None unless the words in front of it pass as a name. Tried only once the
+    other ways of finding a title have failed, so no entry they already read
+    changes. The detail is cut again too: "this week" is also a section label,
+    and the cut that stops an entry at the next section stopped this one
+    inside its own heading -- two words long, the date gone with the rest.
+    """
+    when = WHEN_WORDS.search(body, begins, position)
+    if not when:
+        return None
+    name = _tidy_title(body[begins:when.start()])
+    # A heading starts with a capital and speaks to no one; a sentence does
+    # neither. "Remember to email us your resume by EOD tomorrow" is a
+    # deadline, and the words in front of its "tomorrow" are no event's name.
+    said = {w.lower() for w in re.findall(r"[A-Za-z']+", name)}
+    if not name[:1].isupper() or said & SENTENCE_WORDS:
+        return None
+    mend = titles.repair(name, ref, "mail")
+    if not mend["ok"]:
+        return None
+    detail = _clean(body[begins:when.end()]
+                    + _until_next_section(body[when.end():following]))[:1200]
+    if LISTING.search(f"{mend['fixed']} {detail[:160]}"):
+        return None
+    return mend["fixed"], detail
+
+
 def _title_before(text: str, start: int, position: int) -> str:
     return _title_span(text, start, position)[0]
 
@@ -453,6 +497,10 @@ def segments(text: str, ref=None) -> list:
             continue
         mend = titles.repair(title, ref, "mail")
         fixed = mend["fixed"] if mend["ok"] else _rescue_from_prose(title, ref)
+        if not fixed:
+            heading = _heading_ended_by_when(body, begins, position, following, ref)
+            if heading:
+                fixed, detail = heading
         if not fixed:
             # Last resort: the contents list at the top names the host.
             day = next((d for pos, d, _c in anchors if pos == position), None)

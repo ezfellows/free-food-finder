@@ -276,3 +276,59 @@ class TestCflosLayout(unittest.TestCase):
             "Upcoming:\n- Bar Review, 9/17\n- Speed Networking, 10/13"))
         self.assertIn("12:00 pm - 1:30 pm", denoise("Oct 1, 12:00 pm - 1:30 pm"))
         self.assertIn("3:30 - 5:30 P.M.", denoise("Sept 28 | 3:30 - 5:30 P.M."))
+
+
+class TestAHeadingThatSaysWhen(unittest.TestCase):
+    """A CampusGroups newsletter sets each heading in the same table cell as
+    its first sentence, and the plain text runs the two together: "Bible
+    Study This Week Our weekly Bible Study will begin next Wednesday, October
+    14". The "this week" is where the heading ends. Read whole, the entry was
+    dropped, and its date with it.
+    """
+
+    REF = datetime(2026, 10, 13, 10, 32)
+
+    def split(self, *cells):
+        text = "\n\n".join(["| |"] + ["| ## %s |" % cell for cell in cells]
+                           + ["*Chess Club*"])
+        return [(part["title"], part["starts_at"])
+                for part in newsletter.split(text, self.REF)]
+
+    def test_the_name_is_the_heading_in_front_of_this_week(self):
+        self.assertEqual(self.split(
+            "Trivia Night This Week Our monthly trivia night will be next "
+            "Wednesday, October 14, at 7:00 p.m. in McDonough 200. Pizza will "
+            "be provided!"), [("Trivia Night", datetime(2026, 10, 14, 19, 0))])
+
+    def test_and_the_food_stays_in_the_detail(self):
+        text = ("| ## Trivia Night This Week Our monthly trivia night will be "
+                "next Wednesday, October 14, at 7:00 p.m. in McDonough 200. "
+                "Pizza will be provided! |")
+        self.assertIn("Pizza will be provided",
+                      newsletter.split(text, self.REF)[0]["detail"])
+
+    def test_tonight_ends_a_heading_too(self):
+        self.assertEqual(self.split(
+            "Movie Night Tonight Join the club on Tuesday, October 13, at 8:00 "
+            "p.m. in Hotung 2001 for popcorn and a film."),
+            [("Movie Night", datetime(2026, 10, 13, 20, 0))])
+
+    def test_a_masthead_is_still_no_event(self):
+        """"Events This Week" names the newsletter, not anything to attend."""
+        self.assertEqual(self.split(
+            "Events This Week Join us next Wednesday, October 14, at 7:00 p.m. "
+            "in McDonough 200."), [])
+
+    def test_a_sentence_in_front_of_today_is_no_name(self):
+        """A deadline: it speaks to the reader, as no heading does."""
+        self.assertEqual(self.split(
+            "Remember to email us your resume by EOD today to get matched "
+            "with mentors at the session on Wednesday, October 14, at noon."), [])
+
+    def test_nor_is_the_middle_of_one(self):
+        """Cut mid-sentence, the words in front of "today" start in lower case."""
+        text = ("| ## Career Week |\n\nand a resume review clinic today, with "
+                "feedback from mentors at the session on Wednesday, October 14, "
+                "at noon.")
+        self.assertNotIn("and a resume review clinic",
+                         [part["title"] for part in newsletter.split(text, self.REF)])
