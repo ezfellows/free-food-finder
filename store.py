@@ -458,11 +458,81 @@ def stored_id(conn, ev: dict) -> str:
     return row[0] if row else ""
 
 
-def prune(conn, older_than_days: int = 30) -> int:
+# How long an event is kept once it has started. Every email is read again on
+# every refresh, so one about a talk from six weeks ago was stored again each
+# time, only for the same refresh to prune it.
+KEEP_DAYS = 30
+
+
+def expired(starts_at, older_than_days: int = KEEP_DAYS) -> bool:
+    """Whether `prune` deletes an event that starts then."""
+    cutoff = (datetime.now() - timedelta(days=older_than_days)).isoformat()
+    # Compared as the DELETE compares them.
+    return starts_at is not None and starts_at < cutoff
+
+
+def prune(conn, older_than_days: int = KEEP_DAYS) -> int:
     cutoff = (datetime.now() - timedelta(days=older_than_days)).isoformat()
     cur = conn.execute("DELETE FROM events WHERE starts_at < ?", (cutoff,))
     conn.commit()
     return cur.rowcount
+
+
+def _slot(event: dict):
+    """The minute an event starts and the organisation holding it."""
+    if not (event.get("org") or "").strip():
+        return None
+    return ("slot", (event.get("starts_at") or "")[:16],
+            _STOP.sub(" ", event["org"].lower()).strip()[:24])
+
+
+def _room(event: dict):
+    """The same minute in the same room is the same event.
+
+    The org key cannot catch a bulletin's own copy, because a relayed
+    newsletter is credited to the relay: the AASV meeting is "Advocates
+    Against Sexual Violence" on its flyer and "Office of Student Life" in
+    the broadcast that carried it. Both say McDonough 200 at 15:30, and
+    two different events cannot be in one room at one minute.
+    """
+    import campus
+    where = campus.locate(event.get("location") or "")
+    place = (where.get("place") or "").strip().lower()
+    if not place or where.get("campus") != "home" or not where.get("room"):
+        return None
+    return ("room", (event.get("starts_at") or "")[:16], place)
+
+
+def listings(conn) -> dict:
+    """{slot or room: event id} for every listing a mail copy could repeat.
+
+    Every source but mail, since mail is the one that restates. A dismissed
+    listing holds nothing. When the flyer's copy is the one a person threw out
+    -- MLS's Big Law Panel, GPLA's coffee talk and If/When/How's panel on
+    10 Oct 2026, kept from the email instead -- it still held the slot, so
+    the next refresh deleted the email's copy too and the event left the
+    page altogether.
+    """
+    held = {}
+    for row in conn.execute(
+            "SELECT id, starts_at, org, location FROM events "
+            "WHERE COALESCE(starts_at,'') != '' AND COALESCE(source,'') != 'mail' "
+            "AND NOT COALESCE(dismissed, 0) ORDER BY starts_at"):
+        event = dict(row)
+        for key in (_slot(event), _room(event)):
+            if key is not None:
+                held.setdefault(key, event["id"])
+    return held
+
+
+def repeats(event: dict, held: dict) -> str:
+    """The id of the listing a mail event repeats, from `listings`, or ''."""
+    if not event.get("starts_at"):
+        return ""
+    for key in (_slot(event), _room(event)):
+        if key in held:
+            return held[key]
+    return ""
 
 
 def dedupe_slots(conn) -> int:
@@ -480,50 +550,17 @@ def dedupe_slots(conn) -> int:
     and since the calendar feed labels everything with the same placeholder
     org, it deleted unrelated talks that merely started at the same hour.
     A newsletter is the one source that restates what another already said.
+
+    `ingest.mail.run` asks `repeats` before storing anything, so a copy is
+    rarely stored at all. This removes one stored before the listing it
+    repeats arrived.
     """
-    rows = conn.execute(
-        "SELECT id, title, starts_at, org, location, source, flyer_id, dismissed "
-        "FROM events WHERE COALESCE(starts_at,'') != '' "
-        "ORDER BY starts_at").fetchall()
-
-    def slot(row):
-        if not (row["org"] or "").strip():
-            return None
-        return ((row["starts_at"] or "")[:16],
-                _STOP.sub(" ", (row["org"] or "").lower()).strip()[:24])
-
-    def room(row):
-        """The same minute in the same room is the same event.
-
-        The org key cannot catch a bulletin's own copy, because a relayed
-        newsletter is credited to the relay: the AASV meeting is "Advocates
-        Against Sexual Violence" on its flyer and "Office of Student Life" in
-        the broadcast that carried it. Both say McDonough 200 at 15:30, and
-        two different events cannot be in one room at one minute.
-        """
-        import campus
-        where = campus.locate(row["location"] or "")
-        place = (where.get("place") or "").strip().lower()
-        if not place or where.get("campus") != "home" or not where.get("room"):
-            return None
-        return ((row["starts_at"] or "")[:16], place)
-
-    # A dismissed listing holds nothing. When the flyer's copy is the one a
-    # person threw out -- MLS's Big Law Panel, GPLA's coffee talk and
-    # If/When/How's panel on 10 Oct 2026, kept from the email instead -- it
-    # still held the slot, so the next refresh deleted the email's copy too
-    # and the event left the page altogether.
-    standing = [r for r in rows
-                if (r["source"] or "") != "mail" and not r["dismissed"]]
-    held = {slot(r) for r in standing}
-    held_rooms = {room(r) for r in standing}
-    held.discard(None)
-    held_rooms.discard(None)
+    held = listings(conn)
     removed = 0
-    for row in rows:
-        if (row["source"] or "") != "mail":
-            continue
-        if slot(row) not in held and room(row) not in held_rooms:
+    for row in conn.execute(
+            "SELECT id, starts_at, org, location FROM events "
+            "WHERE source = 'mail' AND COALESCE(starts_at,'') != ''").fetchall():
+        if not repeats(dict(row), held):
             continue
         conn.execute("UPDATE flyers SET event_id = '' WHERE event_id = ?",
                      (row["id"],))

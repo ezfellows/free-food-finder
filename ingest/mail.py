@@ -755,7 +755,8 @@ def run(conn=None, cfg=None, min_tier="possible") -> dict:
     own = conn is None
     conn = conn or store.connect()
     cfg = cfg if cfg is not None else load_config()
-    stats = {"source": "mail", "found": 0, "added": 0, "updated": 0, "error": None}
+    stats = {"source": "mail", "found": 0, "added": 0, "updated": 0,
+             "already_listed": 0, "deduped": 0, "error": None}
     try:
         events, log = [], {}
         drop = (cfg.get("mail") or {}).get("maildrop")
@@ -767,11 +768,14 @@ def run(conn=None, cfg=None, min_tier="possible") -> dict:
         if not events and not drop and not cfg.get("imap"):
             raise RuntimeError("no mail source configured (see data/config.example.json)")
         stats["found"] = len(events)
-        # A bulletin restates what a flyer already announced, so the slot is
-        # swept after the batch rather than per event: the flyer may arrive in
-        # the same run, after the newsletter that mentioned it.
-        stats["deduped"] = 0
         rank = {"confirmed": 3, "likely": 2, "possible": 1, "unlikely": 0}
+
+        def keep(ev, key):
+            stats[store.upsert(conn, ev)] += 1
+            if key in log:
+                log[key]["events"].append(store.stored_id(conn, ev))
+
+        new = []
         for ev in events:
             key = ev.pop("_mail_key", None)
             if (rank.get(ev["tier"], 0) < rank.get(min_tier, 1)
@@ -779,9 +783,30 @@ def run(conn=None, cfg=None, min_tier="possible") -> dict:
                 if key in log:
                     log[key]["below"] += 1
                 continue
-            stats[store.upsert(conn, ev)] += 1
+            if store.expired(ev.get("starts_at")):
+                continue
+            if store.stored_id(conn, ev):
+                keep(ev, key)
+            else:
+                new.append((ev, key))
+        # Every email is read again on every refresh. One that repeats what
+        # the calendar or a flyer already lists was stored each time, only
+        # for the sweep below to delete it again -- seven on every refresh
+        # in October 2026, each counted as added. So an event not yet stored
+        # is checked first, and only once the rest have merged in: a merge
+        # can move the listing it would repeat, since an email that matches
+        # a calendar entry by title gives that entry its own org and room.
+        held = store.listings(conn)
+        for ev, key in new:
+            listing = "" if store.stored_id(conn, ev) else store.repeats(ev, held)
+            if not listing:
+                keep(ev, key)
+                continue
+            stats["already_listed"] += 1
             if key in log:
-                log[key]["events"].append(store.stored_id(conn, ev))
+                log[key]["events"].append(listing)
+        # A copy stored before the listing it repeats arrived -- the calendar
+        # entry or the flyer came later -- goes now.
         stats["deduped"] = store.dedupe_slots(conn)
         for entry in log.values():
             store.note_mail(conn, entry)

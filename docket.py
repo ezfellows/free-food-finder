@@ -360,7 +360,7 @@ def refresh(cfg: dict = None) -> dict:
         results.append(mail.run(conn, cfg))
     if cfg.get("orgs"):
         results.append(orgs.run(conn, cfg))
-    store.prune(conn, older_than_days=30)
+    store.prune(conn)
     flyers.prune(conn)
     # Last, so a source that re-sends a field a person has already ruled on
     # does not quietly win it back.
