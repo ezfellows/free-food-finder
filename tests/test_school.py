@@ -91,6 +91,7 @@ class TestNoProfile(unittest.TestCase):
 
     def test_nothing_to_search_for_until_someone_is_allowed(self):
         conn = store.connect(os.path.join(tempfile.mkdtemp(), "q.db"))
+        self.addCleanup(conn.close)
         self.assertEqual(mailquery.terms(conn), [])
         store.set_sender_verdict(conn, "chess@example.edu", "allow")
         self.assertEqual(mailquery.terms(conn), ["from:chess@example.edu"])
@@ -188,6 +189,7 @@ class TestAProfileOfYourOwn(unittest.TestCase):
 
     def test_its_searches(self):
         conn = store.connect(os.path.join(tempfile.mkdtemp(), "q.db"))
+        self.addCleanup(conn.close)
         self.assertEqual(mailquery.terms(conn),
                          ["from:example.edu", "from:lists.example.edu"])
 

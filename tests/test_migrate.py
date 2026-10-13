@@ -148,7 +148,7 @@ class TestMigration(unittest.TestCase):
 
     def test_migration_is_idempotent(self):
         self.conn.close()
-        self.conn = store.connect(self.path)
+        store.connect(self.path).close()
         self.conn = store.connect(self.path)
         self.assertIn("flyer_id", self.columns())
         self.assertEqual(
@@ -206,6 +206,7 @@ class TestDedupeSlots(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.conn = store.connect(os.path.join(self.tmp, "d.db"))
+        self.addCleanup(self.conn.close)
 
     def add(self, **kw):
         event = {"title": "x", "starts_at": "2026-09-23T15:30:00", "org": "ILSA",
@@ -254,6 +255,7 @@ class TestCorrections(unittest.TestCase):
 
     def setUp(self):
         self.conn = store.connect(os.path.join(tempfile.mkdtemp(), "c.db"))
+        self.addCleanup(self.conn.close)
         store.upsert(self.conn, {"title": "Panel", "source": "broadcast",
                                  "starts_at": "2026-10-01T17:30:00",
                                  "tier": "confirmed"})
@@ -310,6 +312,7 @@ class TestARetitledEventIsReadAgain(unittest.TestCase):
 
     def setUp(self):
         self.conn = store.connect(os.path.join(tempfile.mkdtemp(), "r.db"))
+        self.addCleanup(self.conn.close)
         self.event = {"title": "Event featuring Ropes & Gray", "source": "mail",
                       "org": "Antitrust", "location": "McDonough 220",
                       "starts_at": "2026-09-30T17:30:00", "tier": "confirmed"}
@@ -344,6 +347,7 @@ class TestADismissalSurvivesReingest(unittest.TestCase):
 
     def setUp(self):
         self.conn = store.connect(os.path.join(tempfile.mkdtemp(), "d.db"))
+        self.addCleanup(self.conn.close)
         self.event = {"title": "Date and Time", "source": "mail", "org": "APALSA",
                       "starts_at": "2026-10-01T19:00:00", "tier": "unlikely"}
         store.upsert(self.conn, dict(self.event))

@@ -121,6 +121,7 @@ class TestWhatAMessageSaysIsStillChecked(Isolated):
 
     def test_a_sender_refused_by_hand_stays_refused_on_a_list(self):
         conn = store.connect(os.path.join(tempfile.mkdtemp(), "s.db"))
+        self.addCleanup(conn.close)
         store.set_sender_verdict(conn, "alex.doe@example.edu", "deny")
         self.assertFalse(verdict(post(), conn)["allow"])
 
@@ -134,6 +135,7 @@ class TestASenderYouAdded(Isolated):
 
     def test_and_one_allowed_earlier_in_the_register_still_is(self):
         conn = store.connect(os.path.join(tempfile.mkdtemp(), "s.db"))
+        self.addCleanup(conn.close)
         store.set_sender_verdict(conn, "chair@example.org", "allow")
         msg = post(frm="chair@example.org", to="reader1@georgetown.edu")
         self.assertTrue(verdict(msg, conn)["allow"])
@@ -157,7 +159,9 @@ class TestAlongsideAProfile(unittest.TestCase):
 
 class TestSearching(Isolated):
     def test_every_way_a_list_post_can_be_found(self):
-        terms = mailquery.terms(store.connect(os.path.join(tempfile.mkdtemp(), "q.db")))
+        conn = store.connect(os.path.join(tempfile.mkdtemp(), "q.db"))
+        self.addCleanup(conn.close)
+        terms = mailquery.terms(conn)
         for term in (f"from:{LIST}", f"to:{LIST}", f"cc:{LIST}", f"list:{LIST}",
                      "from:chessclub@gmail.com"):
             self.assertIn(term, terms)
@@ -180,6 +184,7 @@ class TestFromInboxToEvent(Isolated):
         with open(os.path.join(drop, "gm-1a2b3c4d5e6f7a8b.eml"), "wb") as fh:
             fh.write(post().as_bytes())
         conn = store.connect(os.path.join(tempfile.mkdtemp(), "e.db"))
+        self.addCleanup(conn.close)
         stats = mail.run(conn, {"mail": {"maildrop": drop}})
         self.assertIsNone(stats["error"])
         rows = [dict(r) for r in conn.execute("SELECT title, org FROM events")]

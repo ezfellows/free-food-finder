@@ -86,6 +86,7 @@ class TestCorroboration(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.conn = store.connect(os.path.join(self.tmp, "p.db"))
+        self.addCleanup(self.conn.close)
 
     def add(self, title, starts_at):
         store.upsert(self.conn, {"title": title, "starts_at": starts_at,
@@ -150,6 +151,7 @@ class TestCarrying(unittest.TestCase):
         """
         import publish
         conn = store.connect(os.path.join(tempfile.mkdtemp(), "v.db"))
+        self.addCleanup(conn.close)
         store.note_submission(conn, {"id": "gone", "title": "Rejected"},
                               "rejected", "already happened")
         verdicts = store.submission_verdicts(conn)

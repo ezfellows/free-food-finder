@@ -160,6 +160,7 @@ class TestRoomDedupe(unittest.TestCase):
 
     def setUp(self):
         self.conn = store.connect(os.path.join(tempfile.mkdtemp(), "d.db"))
+        self.addCleanup(self.conn.close)
         self.when = (datetime.now() + timedelta(days=4)).strftime("%Y-%m-%dT%H:%M:00")
 
     def add(self, title, source, org, location):

@@ -26,6 +26,7 @@ import timing     # noqa: E402
 class Harness(unittest.TestCase):
     def setUp(self):
         self.conn = store.connect(os.path.join(tempfile.mkdtemp(), "t.db"))
+        self.addCleanup(self.conn.close)
 
     def event(self, **kw):
         base = {"title": "Panel", "source": "broadcast", "tier": "confirmed",

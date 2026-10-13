@@ -68,6 +68,7 @@ class TestTheWindow(unittest.TestCase):
 class TestTheSearches(unittest.TestCase):
     def setUp(self):
         self.conn = store.connect(os.path.join(tempfile.mkdtemp(), "q.db"))
+        self.addCleanup(self.conn.close)
         store.set_sender_verdict(self.conn, "gulc.sipla@gmail.com", "allow")
         store.set_sender_verdict(self.conn, "spam@example.com", "deny")
 
@@ -114,6 +115,7 @@ class TestWhatGetsFetched(unittest.TestCase):
 
     def setUp(self):
         self.conn = store.connect(os.path.join(tempfile.mkdtemp(), "s.db"))
+        self.addCleanup(self.conn.close)
         store.set_sender_verdict(self.conn, "gulc.sipla@gmail.com", "allow")
         store.set_sender_verdict(self.conn, "noisy@georgetown.edu", "deny")
         self.drop = tempfile.mkdtemp()
@@ -202,6 +204,7 @@ class TestTheBroadcastGoesInOnce(unittest.TestCase):
 
     def setUp(self):
         self.conn = store.connect(os.path.join(tempfile.mkdtemp(), "b.db"))
+        self.addCleanup(self.conn.close)
         self.drop = tempfile.mkdtemp()
         self.path = os.path.join(self.drop, "gm-osl1009.eml")
         with open(self.path, "wb") as fh:
@@ -332,6 +335,7 @@ class TestOriginalsBySize(unittest.TestCase):
 
     def setUp(self):
         self.conn = store.connect(os.path.join(tempfile.mkdtemp(), "z.db"))
+        self.addCleanup(self.conn.close)
         self.drop = tempfile.mkdtemp()
 
     def pick(self, *messages):
