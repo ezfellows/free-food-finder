@@ -45,7 +45,8 @@ students. Expect rough edges; issues and pull requests are welcome.
   comes with Apple's Command Line Tools. No packages to install. On Windows,
   use WSL.
 - **Your school email.** The hands-off way uses [Claude](https://claude.ai)'s
-  desktop app with Gmail connected; otherwise you can save emails by hand.
+  desktop app with Gmail connected; otherwise you can save emails by hand,
+  from Gmail or Outlook.
 - **A profile for your school.** Georgetown Law's is included. Writing yours
   takes an afternoon: see [Adding your school](#adding-your-school).
 
@@ -87,21 +88,37 @@ step is getting yours in.
 `./fff refresh` reads whatever saved emails (`.eml` files) sit in
 `data/maildrop/`. There are three ways to fill it.
 
-**1. Let Claude do it every weekday (recommended).** Connect Gmail in the
-Claude desktop app, then set up the scheduled task in [`routine/`](routine/);
-its README walks through it. Each run asks `./fff mailquery` what to search
-for, saves the matching emails, refreshes, and (if you publish the page)
-republishes it. It only searches and reads: it never sends, labels, archives
-or deletes anything, and it skips anything that looks like personal
-correspondence before it is ever saved.
+**1. Let Claude do it every weekday (recommended, Gmail only).** Connect Gmail
+in the Claude desktop app, then set up the scheduled task in
+[`routine/`](routine/); its README walks through it. Each run asks
+`./fff mailquery` what to search for, saves the matching emails, refreshes,
+and (if you publish the page) republishes it. It only searches and reads: it
+never sends, labels, archives or deletes anything, and it skips anything that
+looks like personal correspondence before it is ever saved.
 
-**2. Save emails by hand.** In Gmail, open an announcement, choose
-⋮ > **Download message**, and move the `.eml` file into `data/maildrop/`. Then
-`./fff refresh`.
+**2. Save emails by hand**, from Gmail or Outlook. Save each announcement as an
+`.eml` file, move it into `data/maildrop/`, then run `./fff refresh`.
 
-**3. IMAP**, if your school allows app passwords. Fill in the `imap_example`
-block of `data/config.json` and rename it to `imap`. The password lives in the
-macOS Keychain, never in a file; the top of `ingest/mail.py` explains.
+- **Gmail:** open the email, then ⋮ > **Download message**.
+- **Outlook on the web:** open the email, then ⋯ > **Download** >
+  **Download as EML**.
+- **New Outlook for Windows:** open the email, then ⋯ > **Save as** >
+  **Save as EML**.
+- **Outlook for Mac:** drag the email from the message list into a folder.
+- **Classic Outlook for Windows** cannot save an `.eml`; the `.msg` files it
+  saves are a different format. Open the same email in Outlook on the web.
+
+Outlook on the web and the new Outlook leave some of the original headers out
+of the files they save, so the vetting judges those emails by the sender, the
+recipients and the email's own unsubscribe footer. If an announcement you
+expected is missing, `./fff maillog --refused` says why, and
+`./fff sources add` lets its sender in.
+
+**3. IMAP**, if your school allows app passwords. Schools on Microsoft 365 do
+not: Microsoft has refused password sign-in over IMAP since October 2022, app
+passwords included. Elsewhere, fill in the `imap_example` block of
+`data/config.json` and rename it to `imap`. The password lives in the macOS
+Keychain, never in a file; the top of `ingest/mail.py` explains.
 
 After a refresh, `./fff maillog` shows every email that was read, whether it
 was let in, why, and which events it produced.
@@ -274,6 +291,8 @@ tests/          run with ./fff test; GitHub runs them on every push
 
 - **The calendar reader knows LiveWhale**, which many universities use. Other
   calendar systems need an ingester; email works everywhere.
+- **The daily mail pull is Gmail only.** With Outlook, save announcements by
+  hand: see [Getting your mail in](#getting-your-mail-in).
 - **Flyer reading is macOS only**, and stylised lettering garbles about one
   flyer in eight; those wait in `./fff flyers pending` for a person.
 - **The networking side is tuned for law students** looking for firm events.
