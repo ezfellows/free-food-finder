@@ -363,8 +363,12 @@ def build_events(conn, days: int = 30, min_tier: str = "possible",
         event["flyer"] = fid or ""
         # A flyer's QR code is stored at ingest; an email's sign-up link is
         # read here, so the list of sites it may come from applies to every
-        # event already stored.
-        event["rsvp_url"] = (event.get("rsvp_url")
+        # event already stored. The stored link meets the same rule: a QR
+        # code is as often a shortener (bit.ly, qr.codes), a spreadsheet or
+        # the organiser's own editing link as a sign-up form, and the reader
+        # can still scan the flyer itself.
+        stored = event.get("rsvp_url") or ""
+        event["rsvp_url"] = ((stored if signup_page(stored) else "")
                              or (rsvp_link(event.get("description"))
                                  if "mail" in source else ""))
         event["track"] = rsvp_track(event)

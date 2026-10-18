@@ -134,6 +134,56 @@ class TestTheLinkOutOfAnEmail(unittest.TestCase):
             self.assertEqual(docket.rsvp_link(text), "")
 
 
+class TestAStoredLinkMeetsTheRuleToo(unittest.TestCase):
+    """A flyer's QR code is stored as its RSVP link. It is as often a
+    shortener, a spreadsheet or the organiser's editing link as a form."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.conn = store.connect(os.path.join(tempfile.mkdtemp(), "stored.db"))
+        common = {"tier": "confirmed", "confidence": 95, "has_food": True,
+                  "meals": ["snacks"], "venue_class": "law",
+                  "location": "Hotung 2000", "starts_at": "2099-04-01T18:00:00"}
+        for title, source, url, text in (
+                ("Shortened", "broadcast", "https://bit.ly/abcdef", ""),
+                ("Editing Link", "broadcast",
+                 "https://docs.google.com/forms/d/1AbCdEfGhIjKlMnOpQrStUv/edit", ""),
+                ("A Spreadsheet", "broadcast",
+                 "https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUv", ""),
+                ("A Real Form", "broadcast", "https://forms.gle/AbCdEf123456", ""),
+                ("Email Fallback", "mail", "https://qr.codes/AbC123",
+                 "Free snacks. RSVP Here (" + FLO + ")")):
+            store.upsert(cls.conn, dict(common, title=title, source=source,
+                                        rsvp_url=url, description=text))
+        cls.links = {e["title"]: e["rsvp_url"]
+                     for e in docket.build_events(cls.conn, days=99999)}
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.conn.close()
+
+    def test_all_five_are_built(self):
+        """Guard the guard."""
+        self.assertEqual(len(self.links), 5, self.links)
+
+    def test_what_is_not_a_sign_up_page_is_dropped(self):
+        for title in ("Shortened", "Editing Link", "A Spreadsheet"):
+            self.assertEqual(self.links[title], "", title)
+
+    def test_a_form_is_kept(self):
+        self.assertEqual(self.links["A Real Form"], "https://forms.gle/AbCdEf123456")
+
+    def test_an_email_falls_back_to_the_link_it_gives(self):
+        self.assertEqual(self.links["Email Fallback"], FLO)
+
+    def test_the_stored_link_itself_is_left_alone(self):
+        """Dropped from the page, not from the record: a person may still
+        want to see what the flyer pointed at."""
+        row = self.conn.execute("SELECT rsvp_url FROM events WHERE title = ?",
+                                ("Shortened",)).fetchone()
+        self.assertEqual(row[0], "https://bit.ly/abcdef")
+
+
 class TestOnTheBuiltEvents(unittest.TestCase):
     """What the page is handed, end to end from the database."""
 

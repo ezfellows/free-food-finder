@@ -222,10 +222,12 @@ Beside the docket (above it, folded, on a phone) an **RSVP list** gathers every
 event whose announcement asks you to sign up, in two tabs, Firms and Law
 school. Each lists events soonest first, by the stated deadline, or by the
 event itself when none is stated. A reader can tick off what they have RSVP'd
-to; ticks stay in their own browser. A sign-up link is shown when the email
-gives one on a known sign-up site (Flo Recruit, Google or Microsoft Forms,
-CampusGroups, Symplicity) in a form that is the same for every reader. Nothing
-else from an email is ever linked. Events where the host pays for a ride or
+to; ticks stay in their own browser. A sign-up link is shown only when it is
+on a known sign-up site (Flo Recruit, Google or Microsoft Forms, CampusGroups,
+Symplicity) in a form that is the same for every reader, whether an email or a
+flyer's QR code gave it. A shortened link, a spreadsheet or an organiser's
+editing link is left off; the flyer is still there to scan. Events where the
+host pays for a ride or
 travel carry a green tag such as "Uber voucher · with RSVP".
 
 **Receptions** carry a tag of their own: "Reception" when the event is one,
