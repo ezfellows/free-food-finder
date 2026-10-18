@@ -117,8 +117,9 @@ EXCLUSIVE = re.compile(
 
 # "Dear Alex," -- one given name, at the very top of the message.
 SALUTATION = re.compile(
-    r"^\s{0,4}(?:dear|hi|hello|hey|good\s+(?:morning|afternoon|evening))\s+"
-    r"([A-Z][a-z]{1,19})\s*[,!.]",
+    r"^\s{0,4}(?i:dear|hi|hello|hey|good\s+(?:morning|afternoon|evening))\s+"
+    r"(?!(?:All|Everyone|Everybody|Team|Students|Folks|Friends|Colleagues|"
+    r"There)\b)([A-Z][a-z]{1,19})\s*[,!.]",
     re.M)
 
 # Anything that says the message went to a crowd. An unsubscribe link is the
@@ -199,6 +200,37 @@ def addressed_to_itself(msg, sender: str) -> bool:
     return bool(seen) and seen <= {sender.lower()}
 
 
+def bcc_to_the_class(msg) -> bool:
+    """A firm's mailing to the class, sent with the students in Bcc.
+
+    What shows is nobody, or only the firm's own people: Akin's 1L programs of
+    13 Oct 2026 went out with its legal-talent mailbox in Cc and the class
+    hidden, and Davis Polk's 1L receptions with no visible recipient at all.
+    Both were refused as a firm "writing to one reader". A firm's note to one
+    student has that student in To. Read only for a firm's address: a school
+    sender shares the student's own domain, so the same shape says nothing.
+
+    It answers the question the address checks ask -- one reader, or many --
+    and nothing else. What the message says is still read as before.
+    """
+    import senders
+    sender = senders.address_of(msg.get("From", "")) if msg is not None else ""
+    if not sender or not senders.firm_recruiting(sender):
+        return False
+    home = _base_domain(sender)
+    for field in ("To", "Cc"):
+        for value in msg.get_all(field) or []:
+            for _, address in email.utils.getaddresses([value]):
+                if address and "@" in address and _base_domain(address) != home:
+                    return False
+    return True
+
+
+def _base_domain(address: str) -> str:
+    """"us.akingump.com" and "akingump.com" are one firm."""
+    return ".".join(address.lower().rpartition("@")[2].split(".")[-2:])
+
+
 def recipient_count(msg) -> int:
     seen = set()
     for field in ("To", "Cc", "Bcc"):
@@ -272,7 +304,7 @@ def assess(msg, body: str = "", allowlisted: bool = False) -> dict:
                 "reason": "greets one person by name (%r) with nothing "
                           "marking it a broadcast" % greeting.group(1)}
     if (not allowlisted and recipient_count(msg) == 1
-            and _sender_is_individual(msg)):
+            and _sender_is_individual(msg) and not bcc_to_the_class(msg)):
         return {"personal": True,
                 "reason": "one person writing to one reader, with nothing "
                           "marking it a broadcast"}

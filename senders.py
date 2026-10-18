@@ -279,7 +279,7 @@ def classify(msg, body: str = "", verdict: str = "") -> dict:
     # agreeing to coffee, and that is the reader's own business.
     firm = firm_recruiting(sender)
     if firm and not (broadcast or listserv or verdict == "allow"):
-        if not personal.is_bulk(msg, body):
+        if not (personal.is_bulk(msg, body) or personal.bcc_to_the_class(msg)):
             return {"allow": False, "sender": sender, "org": "",
                     "reason": f"{firm} writing to one reader, not the class"}
         return {"allow": True, "sender": sender, "org": org_name(msg, sender),

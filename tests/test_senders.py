@@ -17,6 +17,7 @@ os.environ["FFF_SCHOOL"] = "georgetown_law"
 # ...and none of them reads your own settings.
 os.environ["FFF_CONFIG"] = "/nonexistent/free-food-finder/config.json"
 
+import personal  # noqa: E402
 import senders  # noqa: E402
 
 
@@ -327,3 +328,60 @@ class TestLawFirmRecruiting(unittest.TestCase):
             verdict = senders.classify(
                 message("firm@floevents.email", subject=subject), body)
             self.assertFalse(verdict["allow"], subject)
+
+
+class TestAFirmMailingTheClassByBcc(unittest.TestCase):
+    """A firm mails the class with the students in Bcc.
+
+    Akin's 1L programs of 13 Oct 2026 went out with its legal-talent mailbox
+    in Cc and nobody else showing, and Davis Polk's 1L receptions with no
+    visible recipient at all; both were refused as a firm "writing to one
+    reader". A firm's note to one student shows that student.
+    """
+
+    BODY = ("All, we are hosting a 1L reception on Thursday, October 22 at "
+            "6:00 pm. Please join our partners and associates.")
+
+    def classify(self, to=None, cc=None, body=None):
+        msg = Message()
+        msg["From"] = '"Doe, Jane" <jdoe@orrick.com>'
+        if to:
+            msg["To"] = to
+        if cc:
+            msg["Cc"] = cc
+        msg["Subject"] = "1L Reception"
+        return senders.classify(msg, body or self.BODY)
+
+    def test_the_firm_and_its_recruiting_mailbox_alone_in_view(self):
+        verdict = self.classify(cc="Legal Recruiting <recruiting@orrick.com>")
+        self.assertTrue(verdict["allow"], verdict["reason"])
+
+    def test_nobody_in_view_at_all(self):
+        verdict = self.classify()
+        self.assertTrue(verdict["allow"], verdict["reason"])
+
+    def test_a_note_to_one_student_is_still_kept_out(self):
+        self.assertFalse(self.classify(to="reader1@georgetown.edu",
+                                       cc="recruiting@orrick.com")["allow"])
+
+    def test_greeting_the_student_by_name_still_keeps_it_out(self):
+        verdict = self.classify(
+            cc="recruiting@orrick.com",
+            body="Dear Alex,\nThank you for meeting with us. Would you like to "
+                 "join us for coffee on Thursday, October 22 at 10 am?")
+        self.assertFalse(verdict["allow"])
+
+    def test_but_hi_all_greets_the_class(self):
+        """Akin's opened "Hi All," -- a greeting, but to no one by name."""
+        verdict = self.classify(
+            cc="recruiting@orrick.com",
+            body="Hi All,\nWe are hosting a 1L reception on Thursday, October "
+                 "22 at 6:00 pm.")
+        self.assertTrue(verdict["allow"], verdict["reason"])
+
+    def test_only_a_firm_is_read_this_way(self):
+        """A school sender shares the student's domain: the shape says nothing."""
+        msg = Message()
+        msg["From"] = "jd1234@georgetown.edu"
+        msg["Cc"] = "rd123@georgetown.edu"
+        self.assertFalse(personal.bcc_to_the_class(msg))
