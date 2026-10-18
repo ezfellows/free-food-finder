@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import re
 from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qs, urlparse
 
 import campus
 import config
@@ -163,6 +164,79 @@ def public_text(text: str) -> str:
     return re.sub(r"\s{2,}", " ", text).strip(" ,;")
 
 
+# --- the RSVP tracker ----------------------------------------------------
+
+# A firm in the room makes it a firm event, whoever hosts it: a student org's
+# Big Law panel is where a 1L meets Latham. The Office of Career Strategy's
+# 1L Law Firm Receptions name no single firm, so the title has to say it.
+FIRM_TITLE_RX = re.compile(r"\b(?:law\s+firms?|multi-?firm|big\s*law)\b", re.I)
+
+
+def rsvp_track(event: dict) -> str:
+    """"firm" or "school": the tracker tab an event is listed under."""
+    if (event.get("firms") or event.get("network_kind") == "firm"
+            or FIRM_TITLE_RX.search(event.get("title") or "")):
+        return "firm"
+    return "school"
+
+
+# Where to sign up, out of an email. A link in an email can carry the reader:
+# CampusGroups wraps every one with the reader's member_id, a Google Form can
+# arrive filled in with a name, and a ride voucher link is money. So this is a
+# short list of shapes known to be the same for every reader, not a list of
+# shapes known to be bad -- anything not on it is never published.
+SIGNUP_LINK_RX = re.compile(
+    r"(?:rsvp|regist\w*|sign\s*-?\s*up|reserve)\b[^\n]{0,60}?"
+    r"(https?://[^\s<>()\[\]\"']+)", re.I)
+
+
+def _on(host: str, domain: str) -> bool:
+    return host == domain or host.endswith("." + domain)
+
+
+def signup_page(url: str) -> bool:
+    """True when `url` is an event-wide sign-up page on a known site."""
+    try:
+        parts = urlparse(url)
+        query = parse_qs(parts.query, keep_blank_values=True)
+    except ValueError:
+        return False
+    if parts.scheme not in ("http", "https") or parts.fragment:
+        return False
+    host, path, keys = (parts.hostname or "").lower(), parts.path, set(query)
+    if _on(host, "florecruit.com"):
+        # One page per event: /v2/app/<firm>/registration/events/<n>/register
+        return not keys and bool(re.fullmatch(
+            r"/v2/app/[\w-]+/registration/events/\d+/register/?", path))
+    if host == "forms.gle":
+        return not keys and bool(re.fullmatch(r"/[\w-]+", path))
+    if host == "docs.google.com":
+        # `entry.<n>=` fills a field in, sometimes with the reader's name.
+        return keys <= {"usp"} and bool(re.fullmatch(
+            r"/forms/d/(?:e/)?[\w-]+/viewform", path))
+    if host in ("forms.office.com", "forms.cloud.microsoft"):
+        return ("id" in keys and keys <= {"id", "origin", "route"}
+                and path.lower() == "/pages/responsepage.aspx")
+    if _on(host, "campusgroups.com"):
+        # An event's own page. /click is the wrapper that names the reader.
+        return (keys <= {"id"} and not path.lower().startswith("/click")
+                and bool(re.search(r"rsvp|event", path, re.I)))
+    if _on(host, "symplicity.com"):
+        # `id` names the event (see test_privacy); the sign-in page has none.
+        return (path.rstrip("/") == "/students" and "id" in keys
+                and keys <= {"s", "ss", "mode", "id"})
+    return False
+
+
+def rsvp_link(description: str) -> str:
+    """The sign-up link an email gives, when it is safe to publish, or ""."""
+    for match in SIGNUP_LINK_RX.finditer(description or ""):
+        url = match.group(1).rstrip(".,;:!?*")
+        if mail.public_link([url]) == url and signup_page(url):
+            return url
+    return ""
+
+
 def firm_summary(firms) -> str:
     firms = public_firms(firms)
     if not firms:
@@ -267,13 +341,30 @@ def build_events(conn, days: int = 30, min_tier: str = "possible",
         event["notes"] = practical["notes"]
         event["dress_code"] = practical["dress_code"]
         event["rsvp_by"] = practical["rsvp_by"]
+        event["reception"] = practical["reception"]
+        event["rsvp_needed"] = practical["rsvp"]
+        event["rsvp_closed"] = practical["rsvp_closed"]
+        event["perks"] = [dict(p, phrase=public_text(p["phrase"]))
+                          for p in practical["perks"]]
+        # "Lyft codes ... to those who register at least 48 hours before":
+        # the last moment to sign up and still get the ride.
+        cuts = [ref - timedelta(hours=p["lead_hours"])
+                for p in practical["perks"] if p["lead_hours"] and ref]
+        event["perk_by"] = (min(cuts).isoformat(timespec="minutes")
+                            if cuts else "")
         event["signals"] = [s.get("phrase") or s.get("label")
                             for s in (event.get("signals") or [])
                             if s.get("weight", 0) > 0][:4]
         # A filesystem path would carry /Users/<name> onto a public page.
         fid = event.pop("flyer_id", "")
         event["flyer"] = fid or ""
-        event["rsvp_url"] = event.get("rsvp_url") or ""
+        # A flyer's QR code is stored at ingest; an email's sign-up link is
+        # read here, so the list of sites it may come from applies to every
+        # event already stored.
+        event["rsvp_url"] = (event.get("rsvp_url")
+                             or (rsvp_link(event.get("description"))
+                                 if "mail" in source else ""))
+        event["track"] = rsvp_track(event)
         try:
             start = datetime.fromisoformat(event["starts_at"])
             event["when_absolute"] = (start.strftime("%a %-d %b, all day")

@@ -67,6 +67,10 @@ DEFAULT_ABOUT = """
           hosting it</li>
         <li><span class="tag need">Bring stuff</span> a resume, a dress code,
           an RSVP deadline</li>
+        <li><span class="tag recep">Reception</span> a reception, or one to
+          follow the talk</li>
+        <li><span class="tag perk">Uber voucher</span> a ride or travel the
+          host pays for, and whether you have to RSVP to get it</li>
         <li><span class="tag verified">Flyer supplied</span> there is an
           original poster to check, inside <em>Why it is listed</em></li>
         <li><span class="tag posted">Submitted</span> posted by a student
@@ -236,6 +240,18 @@ def payload(events) -> str:
             "areas": e.get("practice_areas") or [],
             "firms": [f["name"] for f in (e.get("firms") or [])],
             "notes": e.get("notes") or [], "rsvpBy": e.get("rsvp_by") or "",
+            # The RSVP tracker: whether a sign-up is asked for, which tab it
+            # sits under, and any ride or travel the host pays for.
+            "rsvpNeeded": bool(e.get("rsvp_needed")),
+            "rsvpClosed": bool(e.get("rsvp_closed")),
+            "track": e.get("track") or "school",
+            "perks": [{"label": p["label"], "withRsvp": bool(p.get("with_rsvp")),
+                       "lead": p.get("lead_hours") or 0,
+                       "phrase": p.get("phrase") or ""}
+                      for p in (e.get("perks") or [])],
+            "perkBy": e.get("perk_by") or "",
+            # "reception", "after" (one follows a talk), or "".
+            "reception": e.get("reception") or "",
             "virtual": bool(e.get("virtual")),
             "campus": e.get("campus") or "",
             "timeNote": e.get("time_note") or "",
@@ -296,6 +312,8 @@ TEMPLATE = r"""<title>__TITLE__</title>
   --muted:#6b675f; --rule:#ddd9d0; --rule-soft:#e9e6de;
   --food:#a85b12; --food-bg:#f6ebdd; --net:#3b3a8f; --net-bg:#e6e5f4;
   --flag:#8a2f2f; --flag-bg:#f7e7e7; --focus:#3b3a8f;
+  --perk:#1d6a4c; --perk-bg:#e1efe7;
+  --recep:#7d3266; --recep-bg:#f3e4ee;
   --serif:"Newsreader",Georgia,"Times New Roman",serif;
   --sans:"IBM Plex Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
   --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
@@ -306,6 +324,8 @@ TEMPLATE = r"""<title>__TITLE__</title>
     --muted:#9a948a; --rule:#302d26; --rule-soft:#262420;
     --food:#e29a4e; --food-bg:#2e2214; --net:#a3a0ef; --net-bg:#1e1d33;
     --flag:#e08585; --flag-bg:#33201f; --focus:#a3a0ef;
+    --perk:#82cfa7; --perk-bg:#15291f;
+    --recep:#e3a6d0; --recep-bg:#2e1b28;
   }
 }
 :root[data-theme="dark"]{
@@ -313,6 +333,8 @@ TEMPLATE = r"""<title>__TITLE__</title>
   --muted:#9a948a; --rule:#302d26; --rule-soft:#262420;
   --food:#e29a4e; --food-bg:#2e2214; --net:#a3a0ef; --net-bg:#1e1d33;
   --flag:#e08585; --flag-bg:#33201f; --focus:#a3a0ef;
+  --perk:#82cfa7; --perk-bg:#15291f;
+  --recep:#e3a6d0; --recep-bg:#2e1b28;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);
@@ -452,6 +474,17 @@ h1{font-family:var(--serif);font-weight:500;font-size:clamp(34px,7.5vw,46px);
   font-weight:500}
 .tag.org{background:transparent;border-color:var(--rule);color:var(--ink-soft)}
 .tag.need{background:var(--flag-bg);border-color:transparent;color:var(--flag)}
+/* Something the host pays for -- a ride, a travel stipend. Green, because
+   the red of a requirement is what stops you at the door and this is the
+   opposite. */
+.tag.perk{background:var(--perk-bg);border-color:transparent;color:var(--perk);
+  font-weight:500}
+/* A reception: the format a 1L is sent to, filled so it is the first thing
+   read on the card. One that follows a talk is only tinted -- an hour of
+   lecture comes first. */
+.tag.recep{background:var(--recep);border-color:transparent;color:var(--paper);
+  font-weight:500}
+.tag.recep.after{background:var(--recep-bg);color:var(--recep)}
 
 .acts{display:flex;flex-wrap:wrap;gap:14px;margin-top:11px;align-items:center}
 .acts button,.acts a{font-size:12.5px;font-weight:500;color:var(--muted);
@@ -583,6 +616,109 @@ button.wide{width:100%;margin-top:18px;padding:12px}
   .entry .rail{padding-top:0}
   .lenses{margin-left:0}
 }
+
+/* The RSVP tracker. One element: under the "Next up" card it is a folding
+   panel, and on a screen wide enough for two columns it moves beside the
+   docket and stays in view. The rows are worked out as the page is read, so
+   a page built a week ago still counts down to the right day. */
+.rsvps{margin-top:18px;border:1px solid var(--rule);background:var(--card)}
+/* The arrow keeps to the title's row: wrapped onto a line of its own, it
+   left a phone an empty-looking third line. */
+.rsvphead{display:grid;grid-template-columns:minmax(0,1fr) auto;
+  align-items:baseline;gap:3px 10px;width:100%;padding:9px 12px;
+  text-align:left}
+.rsvphead > *{grid-column:1}
+.rsvphead::after{content:"\25be";grid-column:2;grid-row:1;color:var(--muted)}
+.rsvps.open .rsvphead::after{content:"\25b4"}
+.rsvphead:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}
+.rsvps:not(.open) .rsvpbody{display:none}
+.rsvptitle{font-family:var(--mono);font-size:10.5px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--ink);font-weight:500}
+.rsvpsum{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.rsvpbody{padding:2px 12px 12px;border-top:1px solid var(--rule-soft)}
+.sidehead{display:none}
+.rsvptabs{display:flex;gap:2px;margin:10px 0 2px;border-bottom:1px solid var(--rule)}
+.rsvptabs button{font-size:13px;font-weight:500;color:var(--muted);
+  border-bottom:2px solid transparent;padding:4px 2px;margin:0 14px -1px 0}
+.rsvptabs button[aria-pressed="true"]{color:var(--ink);border-bottom-color:var(--ink)}
+.rsvptabs .n{font-family:var(--mono);font-size:10.5px;color:var(--muted);
+  margin-left:4px;font-variant-numeric:tabular-nums}
+/* The docket's lens bar in small: every event, or receptions only. */
+.rsvpshow{display:flex;gap:6px;margin-top:10px}
+.rsvpshow button{font-family:var(--mono);font-size:10px;letter-spacing:.07em;
+  text-transform:uppercase;padding:3px 8px;border:1px solid var(--rule);
+  color:var(--muted)}
+.rsvpshow button[aria-pressed="true"]{background:var(--ink);color:var(--paper);
+  border-color:var(--ink)}
+.rsvpshow button[data-rshow="reception"][aria-pressed="true"]{
+  background:var(--recep);border-color:var(--recep)}
+.rgroup{margin-top:12px}
+.rgroup h3,.rfold > summary{font-family:var(--mono);font-size:9.5px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+  font-weight:500;margin:0}
+.rgroup.soon h3{color:var(--flag)}
+.rfold{margin-top:14px}
+.rfold > summary{cursor:pointer;list-style:none;padding:2px 0}
+.rfold > summary::-webkit-details-marker{display:none}
+.rfold > summary::after{content:" \25be"}
+.rfold[open] > summary::after{content:" \25b4"}
+.rfold > summary:hover{color:var(--ink)}
+.rrow{display:grid;grid-template-columns:auto minmax(0,1fr);gap:0 10px;
+  padding:9px 0;border-bottom:1px solid var(--rule-soft)}
+.rrow input{margin:3px 0 0;width:16px;height:16px;accent-color:var(--net);
+  cursor:pointer}
+.rtitle{font-family:var(--serif);font-weight:500;font-size:15.5px;line-height:1.3;
+  text-wrap:balance;overflow-wrap:anywhere}
+.rmeta{font-size:12px;color:var(--muted);margin-top:2px;overflow-wrap:anywhere}
+.rdue{font-family:var(--mono);font-size:10.5px;letter-spacing:.02em;
+  color:var(--ink-soft);margin-top:4px;font-variant-numeric:tabular-nums}
+.rdue.urgent{color:var(--flag);font-weight:600}
+.rdue.none{color:var(--muted)}
+.rdue.perkdue{color:var(--perk)}
+.rdue.perkdue.urgent{color:var(--flag)}
+.rrow .tags{margin-top:6px}
+.racts{margin-top:5px}
+.racts a{font-size:12.5px;font-weight:600;color:var(--net);
+  text-decoration:underline;text-underline-offset:3px;
+  text-decoration-color:var(--rule)}
+.racts a:hover{color:var(--ink)}
+.rrow.done .rtitle{color:var(--muted);text-decoration:line-through;
+  text-decoration-color:var(--rule)}
+.rempty{font-size:13px;color:var(--muted);margin:12px 0 0}
+.rsvpfine{font-size:11.5px;color:var(--muted);margin:14px 0 0}
+
+/* Two columns once there is room for both: the tracker beside the docket,
+   which keeps the width it always had where there is room and narrows where
+   there is not. From 960px: at 1180 the sidebar sat under the docket as a
+   folded bar in a 1024px window -- a laptop, or the Claude app's preview pane
+   -- below the fold, and a reader looking for it saw nothing. Every row of the
+   grid is its own height except the last, which takes whatever the tracker
+   needs beyond the docket -- so a short docket never opens gaps between its
+   own sections. */
+@media (min-width:960px){
+  .wrap{max-width:1140px;display:grid;
+    grid-template-columns:minmax(0,760px) 300px;
+    column-gap:clamp(24px,3vw,40px);
+    grid-template-rows:repeat(9,auto) 1fr;justify-content:center;
+    align-items:start}
+  .wrap > :not(dialog){grid-column:1}
+  .wrap > .masthead{grid-column:1 / -1}
+  .wrap > .rsvps{grid-column:2;grid-row:2 / -1;position:sticky;
+    top:calc(env(safe-area-inset-top,0px) + 16px);
+    max-height:calc(100vh - 32px);overflow:auto;overscroll-behavior:contain;
+    margin-top:20px;border:0;border-left:1px solid var(--rule);
+    background:transparent}
+  /* Shown by the stylesheet alone, whatever the panel was left as on a
+     phone: a script told of the widening could miss it -- a hidden or
+     throttled tab is never told -- and the sidebar would collapse to
+     nothing with no way to open it. */
+  .rsvphead{display:none}
+  #rsvps .rsvpbody{display:block;border-top:0;padding:0 0 4px 20px}
+  .sidehead{display:block;font-family:var(--serif);font-weight:500;
+    font-size:20px;line-height:1.2;margin:0}
+  .sidehead .rsvpsum{display:block;font-family:var(--sans);font-size:12.5px;
+    margin-top:3px}
+}
 </style>
 
 <div class="wrap">
@@ -605,6 +741,27 @@ button.wide{width:100%;margin-top:18px;padding:12px}
 
   <div id="lead"></div>
 
+  <section id="rsvps" class="rsvps" aria-labelledby="rsvpTitle">
+    <button type="button" class="rsvphead" id="rsvpToggle"
+            aria-expanded="false" aria-controls="rsvpBody">
+      <span class="rsvptitle" id="rsvpTitle">RSVPs</span>
+      <span class="rsvpsum" id="rsvpSum"></span></button>
+    <div class="rsvpbody" id="rsvpBody">
+      <h2 class="sidehead">RSVPs <span class="rsvpsum" id="rsvpSide"></span></h2>
+      <div class="rsvptabs" id="rsvpTabs" role="group" aria-label="Which RSVPs">
+        <button type="button" data-track="firm" aria-pressed="true">Firms<span class="n"></span></button>
+        <button type="button" data-track="school" aria-pressed="false">Law school<span class="n"></span></button>
+      </div>
+      <div class="rsvpshow" id="rsvpShow" role="group" aria-label="Show">
+        <button type="button" data-rshow="all" aria-pressed="true">All</button>
+        <button type="button" data-rshow="reception" aria-pressed="false">Receptions</button>
+      </div>
+      <div id="rsvpList"></div>
+      <p class="rsvpfine">Tick an event once you have RSVP&rsquo;d. Ticks are
+        saved in this browser only.</p>
+    </div>
+  </section>
+
   <div class="bar">
     <div class="tabs" id="views" role="group" aria-label="View">
       <button type="button" data-view="list" aria-pressed="true">Docket</button>
@@ -614,6 +771,7 @@ button.wide{width:100%;margin-top:18px;padding:12px}
       <button type="button" data-lens="all" aria-pressed="true">All</button>
       <button type="button" data-lens="food" aria-pressed="false">Food</button>
       <button type="button" data-lens="net" aria-pressed="false">Networking</button>
+      <button type="button" data-lens="reception" aria-pressed="false">Receptions</button>
       <button type="button" data-lens="virtual" aria-pressed="false">Virtual</button>
       <button type="button" id="flyerToggle" aria-pressed="false">Flyers</button>
       <button type="button" id="postToggle" aria-pressed="true">Student posts</button>
@@ -672,6 +830,10 @@ button.wide{width:100%;margin-top:18px;padding:12px}
     <p class="fine">Requirements &mdash; dress code, resume collection, RSVP deadlines
       &mdash; are shown when the event states them. Nothing is inferred: if it is not
       written down, it is not shown.</p>
+    <p class="fine">The RSVP list holds every event whose announcement asks you to
+      sign up, soonest first: by its deadline where one is stated, otherwise by
+      the event itself. A reception, a ride voucher or a travel stipend is
+      tagged only when the announcement names one.</p>
     <p class="fine">Unofficial and student-built. Not affiliated with, endorsed by,
       or speaking for __SCHOOL__. Check the flyer before you walk over.
       <span id="count"></span> scraped events, taken <strong>__STAMP__</strong>,
@@ -700,7 +862,9 @@ button.wide{width:100%;margin-top:18px;padding:12px}
 
   var KEY_VIEW = "docket-view", KEY_LENS = "docket-lens",
       KEY_FLYERS = "docket-flyers", KEY_POSTS = "docket-posts",
-      KEY_FACETS = "docket-facets", KEY_ABOUT = "docket-about";
+      KEY_FACETS = "docket-facets", KEY_ABOUT = "docket-about",
+      KEY_RSVP_TAB = "docket-rsvp-tab", KEY_RSVP_OPEN = "docket-rsvp-open",
+      KEY_RSVPED = "docket-rsvped", KEY_RSVP_SHOW = "docket-rsvp-show";
   function read(k, d) { try { var v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } }
   function write(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
 
@@ -711,8 +875,18 @@ button.wide{width:100%;margin-top:18px;padding:12px}
     ["firm", "Firm",          function (e) { return e.firms || []; }],
     ["area", "Practice area", function (e) { return e.areas || []; }],
     ["meal", "Food",          function (e) { return e.meals || []; }],
-    ["note", "Requirements",  function (e) { return e.notes || []; }]
+    ["note", "Requirements",  function (e) { return e.notes || []; }],
+    // Filtered on the kind of offer, not the amount: "$20 Uber voucher" and
+    // "Uber voucher" are the same thing to someone looking for a ride home.
+    ["perk", "Perks",         function (e) {
+      return (e.perks || []).map(function (p) { return perkKind(p.label); });
+    }]
   ];
+
+  function perkKind(label) {
+    var bare = String(label || "").replace(/^\$\S+\s+/, "");
+    return bare.charAt(0).toUpperCase() + bare.slice(1);
+  }
 
   function readFacets() {
     var out = {};
@@ -762,10 +936,30 @@ button.wide{width:100%;margin-top:18px;padding:12px}
     posts: read(KEY_POSTS, "1") === "1",
     facets: readFacets(),
     open: new Set(),
-    day: null
+    day: null,
+    // The RSVP tracker's tab, and whether its folded groups are open --
+    // kept here because the list is redrawn every minute.
+    track: read(KEY_RSVP_TAB, "firm"),
+    rshow: read(KEY_RSVP_SHOW, "all"),
+    folds: {closed: false, done: false}
   };
   if (["list", "cal"].indexOf(state.view) < 0) state.view = "list";
-  if (["all", "food", "net", "virtual"].indexOf(state.lens) < 0) state.lens = "all";
+  if (["all", "food", "net", "reception", "virtual"].indexOf(state.lens) < 0) state.lens = "all";
+  if (["firm", "school"].indexOf(state.track) < 0) state.track = "firm";
+  if (["all", "reception"].indexOf(state.rshow) < 0) state.rshow = "all";
+
+  // Events this reader has ticked as RSVP'd. This browser only: nobody else
+  // sees them, and they do not follow the reader to another device. Ticks
+  // for events no longer on the page are dropped, so the list cannot grow
+  // without end.
+  var rsvped = (function () {
+    var saved = [];
+    try { saved = JSON.parse(read(KEY_RSVPED, "[]")); } catch (e) {}
+    var listed = new Set(EVENTS.map(function (e) { return String(e.id); }));
+    return new Set((Array.isArray(saved) ? saved : []).map(String)
+      .filter(function (id) { return listed.has(id); }));
+  })();
+  function writeTicks() { write(KEY_RSVPED, JSON.stringify(Array.from(rsvped))); }
 
   var NET = {recruiting:"Recruiting", firm:"Firm in the room",
              practitioner:"Lawyers present", alumni:"Alumni"};
@@ -863,6 +1057,7 @@ button.wide{width:100%;margin-top:18px;padding:12px}
       if (e.submitted && !state.posts) return false;
       if (state.lens === "food") return e.food;
       if (state.lens === "net") return e.net;
+      if (state.lens === "reception") return !!e.reception;
       if (state.lens === "virtual") return e.virtual;
       return true;
     });
@@ -883,6 +1078,7 @@ button.wide{width:100%;margin-top:18px;padding:12px}
       if (!matchesFacets(e)) return false;
       if (state.lens === "food") return e.food;
       if (state.lens === "net") return e.net;
+      if (state.lens === "reception") return !!e.reception;
       if (state.lens === "virtual") return e.virtual;
       return true;
     }).sort(function (a, b) { return when(a) - when(b); });
@@ -899,8 +1095,17 @@ button.wide{width:100%;margin-top:18px;padding:12px}
     return ' <span class="travel">' + esc(note) + "</span>";
   }
 
+  // A reception, or one after a talk. First on the card and filled: it is
+  // the format a 1L is sent to.
+  function recepTag(e) {
+    if (e.reception === "after") return ["recep after", "Reception to follow"];
+    return e.reception ? ["recep", "Reception"] : null;
+  }
+
   function tags(e) {
     var out = [];
+    var recep = recepTag(e);
+    if (recep) out.push(recep);
     if (e.food && TIER[e.tier]) out.push(["food", TIER[e.tier]]);
     (e.meals || []).forEach(function (m) { out.push(["food", m]); });
     if (e.net && NET[e.netKind]) out.push(["net", NET[e.netKind]]);
@@ -915,6 +1120,8 @@ button.wide{width:100%;margin-top:18px;padding:12px}
     // Flyers toggle off the image lives inside "Why it is listed", so
     // nothing otherwise tells a reader there is one to check.
     if (e.flyer) out.push(["verified", "Flyer supplied"]);
+    // A ride or travel the host pays for, and what it takes to get it.
+    (e.perks || []).forEach(function (p) { out.push(["perk", perkText(p)]); });
     // Requirements read as warnings: they are what stops you at the door.
     // The RSVP deadline among them is worked out as the page is read, not
     // when it was built: a page a week old must not still invite an RSVP
@@ -923,6 +1130,10 @@ button.wide{width:100%;margin-top:18px;padding:12px}
     (e.notes || []).forEach(function (n) {
       out.push(deadline && /^RSVP by /.test(n) ? deadline : ["need", n]);
     });
+    // "RSVPs have closed", said in so many words. Once is enough when a
+    // passed deadline has already said it.
+    if (e.rsvpClosed && !(deadline && deadline[1] === "RSVP closed"))
+      out.push(["closed", "RSVP closed"]);
     if (e.submitted) {
       out.push(["posted", "Submitted"]);
       out.push(e.verified ? ["verified", "Verified \u2014 link"]
@@ -949,6 +1160,175 @@ button.wide{width:100%;margin-top:18px;padding:12px}
     return null;
   }
 
+  // --- the RSVP tracker --------------------------------------------------
+
+  // "Lyft voucher · RSVP 48h ahead": the offer, then what it takes.
+  function perkText(p) {
+    return p.label + (p.lead ? " · RSVP " + p.lead + "h ahead"
+                             : p.withRsvp ? " · with RSVP" : "");
+  }
+
+  // The end of the stated deadline day, as a local time; null without one.
+  function deadlineEnd(e) {
+    var p = (e.rsvpBy || "").split("-");
+    if (p.length !== 3) return null;
+    var day = new Date(+p[0], +p[1] - 1, +p[2], 23, 59, 59);
+    return isNaN(day.getTime()) ? null : day;
+  }
+
+  // The last moment to sign up and still get the ride; null without one.
+  function perkCut(e) {
+    if (!e.perkBy) return null;
+    var cut = new Date(e.perkBy);
+    return isNaN(cut.getTime()) ? null : cut;
+  }
+
+  // Calendar days from today: 0 today, 1 tomorrow, -1 yesterday.
+  function daysUntil(d) {
+    var now = new Date();
+    var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    var day = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    return Math.round((day - today) / 86400000);
+  }
+  function daysLeft(n) {
+    return n <= 0 ? "today" : n === 1 ? "tomorrow" : n + " days left";
+  }
+  function dayShort(d) {
+    return d.toLocaleDateString([], {weekday:"short", month:"short", day:"numeric"});
+  }
+
+  // Every event still ahead that asks for a sign-up, with the moment to act
+  // by: the stated deadline, the ride's cut-off or the event itself,
+  // whichever comes first. Student posts never appear -- there is no
+  // announcement to read a deadline from.
+  function rsvpRows() {
+    var now = Date.now();
+    return EVENTS.filter(function (e) {
+      return e.rsvpNeeded && when(e).getTime() > now;
+    }).map(function (e) {
+      var due = deadlineEnd(e), cut = perkCut(e);
+      var closed = !!e.rsvpClosed || (!!due && due.getTime() < now);
+      var times = [when(e).getTime()];
+      if (due && !closed) times.push(due.getTime());
+      if (cut && cut.getTime() > now) times.push(cut.getTime());
+      else cut = null;
+      return {e: e, due: due, cut: cut, closed: closed,
+              track: e.track === "firm" ? "firm" : "school",
+              act: new Date(Math.min.apply(null, times)),
+              done: rsvped.has(String(e.id))};
+    }).sort(function (a, b) { return a.act - b.act; });
+  }
+
+  function dueLine(r) {
+    var e = r.e, line;
+    if (r.closed) {
+      line = '<div class="rdue none">' + (e.rsvpClosed && !(r.due && r.due < new Date())
+        ? "Sign-ups have closed" : "RSVP closed " + esc(dayShort(r.due))) + "</div>";
+    } else if (r.due) {
+      var n = daysUntil(r.due);
+      line = '<div class="rdue' + (n <= 1 ? " urgent" : "") + '">RSVP by ' +
+        esc(dayShort(r.due)) + " · " + daysLeft(n) + "</div>";
+    } else {
+      // The date is on the line above; this says how long is left.
+      var k = daysUntil(when(e));
+      line = '<div class="rdue none">No deadline stated · event ' +
+        (k <= 0 ? "today" : k === 1 ? "tomorrow" : "in " + k + " days") + "</div>";
+    }
+    if (r.cut && !r.closed) {
+      var m = daysUntil(r.cut);
+      var offer = (e.perks || []).filter(function (p) { return p.lead; })[0];
+      line += '<div class="rdue perkdue' + (m <= 1 ? " urgent" : "") + '">' +
+        esc(offer ? perkKind(offer.label) : "Perk") + " if you RSVP by " +
+        esc(dayShort(r.cut) + ", " + fmtTime(r.cut)) + "</div>";
+    }
+    return line;
+  }
+
+  function rsvpRow(r) {
+    var e = r.e, id = "rsvp-" + e.id;
+    var meta = dayShort(when(e)) + (e.allDay ? "" : ", " + fmtSpan(e)) +
+      (e.place ? " · " + e.place : "");
+    var recep = recepTag(e);
+    var chips = (recep ? '<span class="tag ' + recep[0] + '">' + esc(recep[1]) +
+      "</span>" : "") + (e.perks || []).map(function (p) {
+      return '<span class="tag perk">' + esc(perkText(p)) + "</span>";
+    }).join("");
+    return '<div class="rrow' + (r.done ? " done" : "") + '">' +
+      '<input type="checkbox" id="' + esc(id) + '" data-rsvp="' + esc(e.id) +
+        '"' + (r.done ? " checked" : "") +
+        ' aria-label="' + esc("RSVP\u2019d: " + e.title) + '">' +
+      "<div>" +
+        '<div class="rtitle">' + esc(e.title) + "</div>" +
+        '<div class="rmeta">' + esc(meta) + "</div>" +
+        dueLine(r) +
+        (chips ? '<div class="tags">' + chips + "</div>" : "") +
+        (e.rsvp && /^https?:\/\//.test(e.rsvp)
+          ? '<div class="racts"><a href="' + esc(e.rsvp) +
+            '" target="_blank" rel="noopener noreferrer">RSVP \u2197</a></div>'
+          : "") +
+      "</div></div>";
+  }
+
+  var lastRsvps = "";
+  function renderRsvps() {
+    var rows = rsvpRows().filter(function (r) {
+      return state.rshow !== "reception" || !!r.e.reception;
+    });
+    var counts = {firm: 0, school: 0}, next = null;
+    rows.forEach(function (r) {
+      if (r.done || r.closed) return;
+      counts[r.track]++;
+      // A date somebody wrote down, not the event's own start.
+      [r.due, r.cut].forEach(function (d) {
+        if (d && (!next || d < next)) next = d;
+      });
+    });
+    var due = next ? "next deadline " + dayShort(next) : "";
+    document.getElementById("rsvpSum").textContent =
+      (state.rshow === "reception" ? "Receptions · " : "") +
+      "Firms " + counts.firm + " · Law school " + counts.school +
+      (due ? " · " + due : "");
+    document.getElementById("rsvpSide").textContent = due;
+    [].forEach.call(document.querySelectorAll("#rsvpTabs button"), function (b) {
+      b.setAttribute("aria-pressed", String(b.dataset.track === state.track));
+      b.querySelector(".n").textContent = counts[b.dataset.track];
+    });
+    [].forEach.call(document.querySelectorAll("#rsvpShow button"), function (b) {
+      b.setAttribute("aria-pressed", String(b.dataset.rshow === state.rshow));
+    });
+
+    var groups = [["soon", "Due today or tomorrow", []], ["week", "This week", []],
+                  ["later", "Later", []]];
+    var closed = [], done = [];
+    rows.forEach(function (r) {
+      if (r.track !== state.track) return;
+      if (r.done) return done.push(r);
+      if (r.closed) return closed.push(r);
+      var n = daysUntil(r.act);
+      groups[n <= 1 ? 0 : n <= 7 ? 1 : 2][2].push(r);
+    });
+    var html = "";
+    groups.forEach(function (g) {
+      if (g[2].length) html += '<div class="rgroup ' + g[0] + '"><h3>' + g[1] +
+        "</h3>" + g[2].map(rsvpRow).join("") + "</div>";
+    });
+    if (!html) html = '<p class="rempty">' + (done.length
+      ? "Nothing left to RSVP for here."
+      : state.rshow === "reception" ? "No receptions here ask for an RSVP."
+      : "Nothing here asks for an RSVP.") + "</p>";
+    [["closed", "RSVP closed", closed], ["done", "Done", done]].forEach(function (f) {
+      if (f[2].length) html += '<details class="rfold" data-fold="' + f[0] + '"' +
+        (state.folds[f[0]] ? " open" : "") + "><summary>" + f[1] + " (" +
+        f[2].length + ")</summary>" + f[2].map(rsvpRow).join("") + "</details>";
+    });
+    // Redrawn every minute, so only when something changed: replacing the
+    // rows would take the keyboard focus out of the list for nothing.
+    if (html !== lastRsvps) {
+      document.getElementById("rsvpList").innerHTML = html;
+      lastRsvps = html;
+    }
+  }
+
   function why(e) {
     var rows = "";
     if (e.food && e.why) rows += "<dt>Food</dt><dd>" + esc(e.why) + "</dd>";
@@ -961,6 +1341,15 @@ button.wide{width:100%;margin-top:18px;padding:12px}
     // Said plainly, so a reader can weigh it against the quoted wording above.
     if (e.foodNote) rows += "<dt>Reported</dt><dd>" + esc(e.foodNote) + "</dd>";
     if (e.timeNote) rows += '<dt>Times</dt><dd class="dispute">' + esc(e.timeNote) + "</dd>";
+    // The words the offer was read from, so a reader can weigh it.
+    (e.perks || []).forEach(function (p) {
+      rows += "<dt>Perk</dt><dd>" + esc(perkText(p)) +
+        (p.phrase ? '<br><span class="quote"><span>' + esc(p.phrase) +
+                    "</span></span>" : "") + "</dd>";
+    });
+    var cut = perkCut(e);
+    if (cut) rows += "<dt>Cut-off</dt><dd>RSVP by " + esc(dayShort(cut) + ", " +
+      fmtTime(cut)) + " to qualify</dd>";
     rows += "<dt>Source</dt><dd>" + esc(e.source || "Calendar") + "</dd>";
     if (e.flyer) {
       rows += "<dt>Flyer</dt><dd>" +
@@ -1172,6 +1561,7 @@ button.wide{width:100%;margin-top:18px;padding:12px}
     var list = visible();
     renderFacets(beforeFacets());
     renderLead(list);
+    renderRsvps();
     document.getElementById("count").textContent = EVENTS.length;
     var isList = state.view === "list";
     document.getElementById("list").hidden = !isList;
@@ -1455,8 +1845,61 @@ button.wide{width:100%;margin-top:18px;padding:12px}
     render();
   });
 
+  // The tracker: its tabs, the ticks, and the folded groups.
+  document.getElementById("rsvpTabs").addEventListener("click", function (ev) {
+    var b = ev.target.closest("button[data-track]");
+    if (!b) return;
+    state.track = b.dataset.track; write(KEY_RSVP_TAB, state.track);
+    renderRsvps();
+  });
+  document.getElementById("rsvpShow").addEventListener("click", function (ev) {
+    var b = ev.target.closest("button[data-rshow]");
+    if (!b) return;
+    state.rshow = b.dataset.rshow; write(KEY_RSVP_SHOW, state.rshow);
+    renderRsvps();
+  });
+  document.getElementById("rsvpList").addEventListener("change", function (ev) {
+    var box = ev.target.closest("input[data-rsvp]");
+    if (!box) return;
+    // Ticking moves the row to Done, so keep the keyboard where it was: on
+    // the tick that now sits in the ticked row's old place.
+    var boxes = [].slice.call(document.querySelectorAll("#rsvpList input[data-rsvp]"));
+    var at = boxes.indexOf(box);
+    if (box.checked) rsvped.add(box.dataset.rsvp); else rsvped.delete(box.dataset.rsvp);
+    writeTicks();
+    renderRsvps();
+    var after = document.querySelectorAll("#rsvpList input[data-rsvp]");
+    var land = after[Math.min(at, after.length - 1)];
+    if (land && land.offsetParent !== null) land.focus();
+  });
+  // `toggle` does not bubble, so it is caught on the way down.
+  document.getElementById("rsvpList").addEventListener("toggle", function (ev) {
+    var fold = ev.target;
+    if (fold.matches && fold.matches("details.rfold") && fold.dataset.fold) {
+      state.folds[fold.dataset.fold] = fold.open;
+    }
+  }, true);
+
+  // A folding panel under the "Next up" card, closed until opened, and
+  // remembered. Only a narrow screen reads this: beside the docket, the
+  // stylesheet shows the list whatever the panel was left as.
+  (function () {
+    var box = document.getElementById("rsvps");
+    var head = document.getElementById("rsvpToggle");
+    function show(open) {
+      box.classList.toggle("open", open);
+      head.setAttribute("aria-expanded", String(open));
+    }
+    show(read(KEY_RSVP_OPEN, "0") === "1");
+    head.addEventListener("click", function () {
+      var open = !box.classList.contains("open");
+      show(open);
+      write(KEY_RSVP_OPEN, open ? "1" : "0");
+    });
+  })();
+
   render();
-  setInterval(function () { renderLead(visible()); }, 60000);
+  setInterval(function () { renderLead(visible()); renderRsvps(); }, 60000);
 })();
 </script>
 """

@@ -218,6 +218,20 @@ Every event on the page links to Google Calendar and Outlook with its details
 filled in, and an RSVP deadline counts down as the page is read: "RSVP by
 tomorrow", then "RSVP closed".
 
+Beside the docket (above it, folded, on a phone) an **RSVP list** gathers every
+event whose announcement asks you to sign up, in two tabs, Firms and Law
+school. Each lists events soonest first, by the stated deadline, or by the
+event itself when none is stated. A reader can tick off what they have RSVP'd
+to; ticks stay in their own browser. A sign-up link is shown when the email
+gives one on a known sign-up site (Flo Recruit, Google or Microsoft Forms,
+CampusGroups, Symplicity) in a form that is the same for every reader. Nothing
+else from an email is ever linked. Events where the host pays for a ride or
+travel carry a green tag such as "Uber voucher · with RSVP".
+
+**Receptions** carry a tag of their own: "Reception" when the event is one,
+"Reception to follow" when one comes after a talk. The docket's Receptions
+filter and the RSVP list's All / Receptions switch show only those.
+
 Published as a [Claude Artifact](https://claude.ai), the page can also take
 **submissions**: classmates with edit access post events, and the page
 republishes itself with them. Every rebuild must then be given the live page,
@@ -237,8 +251,8 @@ python3 publish.py data/page.html data/live.html
   clerkship panel with no food still makes the list.
 - **Where** is the building *and* the room. Events on another campus are left
   out unless a firm is recruiting there.
-- **Details** — dress code, resume collection, RSVP deadlines — are shown when
-  an event states them, and never guessed.
+- **Details** — dress code, resume collection, RSVP deadlines, a ride voucher
+  or travel stipend — are shown when an event states them, and never guessed.
 - When sources disagree, a person decides: `./fff correct` records a ruling
   that outranks every source.
 
@@ -275,7 +289,7 @@ personal.py     the second check, on content, for every email
 score.py        food, with the phrases behind the call
 network.py      networking value; contacts.py finds law firms (data/firms.json)
 campus.py       building, room, and which campus
-details.py      dress code, resume collection, RSVP deadlines
+details.py      dress code, resume collection, RSVPs, rides and travel paid for
 dateparse.py    dates and times out of English
 newsletter.py   one bulletin, many events
 caption.py      a flyer's caption against what OCR read

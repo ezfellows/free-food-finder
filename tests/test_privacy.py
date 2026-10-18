@@ -277,3 +277,52 @@ class TestTheReadersMailboxStaysOut(unittest.TestCase):
             "RSVP (https://forms.gle/abc123) or write outlaw@law.georgetown.edu")
         self.assertIn("https://forms.gle/abc123", text)
         self.assertIn("outlaw@law.georgetown.edu", text)
+
+
+class TestTheRsvpTrackerPublishesNoPrivateLink(unittest.TestCase):
+    """The tracker publishes a sign-up link out of an email -- the first time
+    the page has carried any link an email gave.
+
+    Beside the sign-up link, a firm's email can carry a ride voucher (money:
+    anyone holding the link can spend it) and CampusGroups' wrapper with the
+    reader's member_id. Neither may reach the page, and the voucher may not
+    ride along inside the quote the perk is shown with.
+    """
+
+    VOUCHER = "https://r.uber.com/AbC123xYz"
+    WRAPPER = ("https://georgetown.campusgroups.com/click?email_links_id=500001"
+               "&member_id=87654321")
+    SIGNUP = ("https://florecruit.com/v2/app/examplefirm/registration/events/"
+              "101234/register")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.conn = store.connect(os.path.join(tempfile.mkdtemp(), "tracker.db"))
+        store.upsert(cls.conn, {
+            "source": "mail", "org": "Example Firm", "title": "Example 1L Reception",
+            "starts_at": "2099-08-01T18:00:00", "location": "Hotung 2001",
+            "tier": "confirmed", "confidence": 95, "has_food": True,
+            "meals": ["dinner"], "venue_class": "law", "network_score": 80,
+            "network_kind": "firm",
+            "description": (
+                "Dinner served. RSVP HERE[](" + cls.WRAPPER + ") "
+                "Please see the Uber voucher link for your arrival trip "
+                "UBER VOUCHER " + cls.VOUCHER + " "
+                "Registration Link: " + cls.SIGNUP)})
+        cls.html = publish.build(cls.conn, days=99999)["html"]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.conn.close()
+
+    def test_the_event_its_perk_and_its_sign_up_link_are_there(self):
+        """Guard the guard: without them the checks below pass vacuously."""
+        self.assertIn("Example 1L Reception", self.html)
+        self.assertIn("Uber voucher", self.html)
+        self.assertIn(self.SIGNUP, self.html)
+
+    def test_no_voucher_and_no_reader_on_the_page(self):
+        page = self.html.lower()
+        for trace in ("r.uber.com", "abc123xyz", "member_id=", "87654321",
+                      "email_links_id"):
+            self.assertNotIn(trace, page, trace)

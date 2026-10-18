@@ -395,7 +395,7 @@ class TestTheVirtualLens(unittest.TestCase):
     def test_a_stored_lens_is_checked_against_the_ones_that_exist(self):
         """A reader who last visited before this lens existed still has a
         valid lens; one who selects it must keep it across a reload."""
-        self.assertIn('["all", "food", "net", "virtual"]', app_script())
+        self.assertIn('["all", "food", "net", "reception", "virtual"]', app_script())
 
     def test_the_lens_bar_wraps(self):
         """Six controls do not fit a phone on one row.
@@ -429,3 +429,189 @@ class TestReportedFoodSaysSoOutLoud(unittest.TestCase):
         script = app_script()
         self.assertIn("e.foodNote", script)
         self.assertIn("<dt>Reported</dt>", script)
+
+
+class TestTheRsvpTracker(unittest.TestCase):
+    """The list of events that ask for a sign-up, beside the docket."""
+
+    def page(self):
+        return publish.page([], "1 January 2026", {"posts": [], "blocked": []})
+
+    def css(self):
+        return publish.TEMPLATE[:publish.TEMPLATE.find("<script>")]
+
+    def test_it_is_on_the_page_with_both_tabs(self):
+        html = self.page()
+        self.assertIn('<section id="rsvps" class="rsvps"', html)
+        self.assertIn('aria-controls="rsvpBody"', html)
+        self.assertIn('data-track="firm"', html)
+        self.assertIn('data-track="school"', html)
+        self.assertIn('id="rsvpList"', html)
+
+    def test_it_sits_between_the_next_up_card_and_the_docket(self):
+        """On a phone, that is where the folding panel goes."""
+        html = self.page()
+        self.assertLess(html.index('id="lead"'), html.index('id="rsvps"'))
+        self.assertLess(html.index('id="rsvps"'), html.index('id="views"'))
+
+    def test_on_a_wide_screen_it_moves_beside_the_docket_and_stays(self):
+        css = self.css()
+        wide = css[css.index("@media (min-width:960px)"):]
+        self.assertIn("grid-template-columns:minmax(0,760px) 300px", wide)
+        self.assertIn(".wrap > .rsvps{grid-column:2", wide)
+        self.assertIn("position:sticky", wide)
+        self.assertIn("overflow:auto", wide)
+
+    def test_beside_the_docket_it_never_waits_on_the_script(self):
+        """A script told of a widening can miss it -- a hidden or throttled
+        tab is never told -- and the sidebar collapsed to nothing, with no
+        way to open it. So the stylesheet alone shows it there."""
+        css = self.css()
+        wide = css[css.index("@media (min-width:960px)"):]
+        self.assertIn("#rsvps .rsvpbody{display:block", wide)
+        self.assertIn(".rsvphead{display:none}", wide)
+        self.assertIn(".rsvps:not(.open) .rsvpbody{display:none}", css)
+        self.assertNotIn("min-width:960px", app_script())
+
+    def test_a_short_docket_never_opens_gaps_between_its_sections(self):
+        """The tracker spans every row; only the last may grow to fit it."""
+        wide = self.css()[self.css().index("@media (min-width:960px)"):]
+        self.assertIn("grid-template-rows:repeat(9,auto) 1fr", wide)
+        self.assertIn("grid-row:2 / -1", wide)
+
+    def test_the_folding_panel_and_the_tab_are_remembered(self):
+        script = app_script()
+        self.assertIn('read(KEY_RSVP_OPEN, "0")', script)
+        self.assertIn("write(KEY_RSVP_OPEN", script)
+        self.assertIn('read(KEY_RSVP_TAB, "firm")', script)
+        self.assertIn("write(KEY_RSVP_TAB", script)
+        self.assertIn('["firm", "school"].indexOf(state.track)', script)
+
+    def test_ticks_go_through_the_guarded_storage_helpers(self):
+        """Storage can throw (a private window, blocked site data). `read`
+        and `write` already catch it; a bare localStorage call would not."""
+        script = app_script()
+        self.assertIn('read(KEY_RSVPED, "[]")', script)
+        self.assertIn("write(KEY_RSVPED", script)
+        self.assertEqual(script.count("localStorage."), 2)
+
+    def test_ticks_for_events_no_longer_listed_are_dropped(self):
+        self.assertIn("listed.has(id)", app_script())
+
+    def test_student_posts_are_left_out(self):
+        """No announcement, so no deadline to read: the rows come from the
+        scraped feed, not from `everything()`."""
+        script = app_script()
+        window = script[script.index("function rsvpRows()"):]
+        self.assertIn("return EVENTS.filter(", window[:400])
+
+    def test_the_countdown_is_worked_out_as_the_page_is_read(self):
+        script = app_script()
+        self.assertIn("renderLead(visible()); renderRsvps();", script)
+        self.assertIn("var now = Date.now();",
+                      script[script.index("function rsvpRows()"):][:200])
+
+    def test_a_redraw_with_nothing_new_leaves_the_rows_alone(self):
+        """Replacing them every minute would take the keyboard focus away."""
+        self.assertIn("if (html !== lastRsvps)", app_script())
+
+    def test_the_footer_says_what_the_list_is(self):
+        self.assertIn("The RSVP list holds every event whose announcement asks "
+                      "you to", self.page())
+
+
+class TestThePerkTag(unittest.TestCase):
+    def test_it_is_styled_in_every_theme(self):
+        css = publish.TEMPLATE[:publish.TEMPLATE.find("<script>")]
+        self.assertIn(".tag.perk{", css)
+        # Light, the system's dark, and a dark chosen on the page.
+        self.assertEqual(css.count("--perk:"), 3)
+        self.assertEqual(css.count("--perk-bg:"), 3)
+
+    def test_cards_carry_it_and_the_filter_offers_it(self):
+        script = app_script()
+        self.assertIn('out.push(["perk", perkText(p)])', script)
+        self.assertIn('["perk", "Perks",', script)
+
+    def test_the_why_panel_quotes_it(self):
+        self.assertIn("<dt>Perk</dt>", app_script())
+
+    def test_the_legend_explains_it(self):
+        self.assertIn('<span class="tag perk">', publish.DEFAULT_ABOUT)
+
+    def test_the_page_is_handed_what_it_needs(self):
+        import json
+        data = json.loads(publish.payload([{
+            "id": "e1", "title": "Reception", "starts_at": "2099-01-01T18:00:00",
+            "ends_at": None, "all_day": 0, "rsvp_needed": True,
+            "rsvp_closed": False, "track": "firm", "perk_by": "2098-12-30T18:00",
+            "perks": [{"label": "Lyft voucher", "with_rsvp": True,
+                       "lead_hours": 48, "phrase": "Lyft codes"}]}])
+            .replace("<\\/", "</"))[0]
+        self.assertTrue(data["rsvpNeeded"])
+        self.assertFalse(data["rsvpClosed"])
+        self.assertEqual(data["track"], "firm")
+        self.assertEqual(data["perkBy"], "2098-12-30T18:00")
+        self.assertEqual(data["perks"], [{"label": "Lyft voucher", "withRsvp": True,
+                                          "lead": 48, "phrase": "Lyft codes"}])
+        self.assertNotIn("desc", data)
+
+
+class TestReceptions(unittest.TestCase):
+    """A tag and a filter of their own, on the docket and in the RSVP list."""
+
+    def page(self):
+        return publish.page([], "1 January 2026", {"posts": [], "blocked": []})
+
+    def test_the_docket_has_a_receptions_filter(self):
+        self.assertIn('data-lens="reception"', self.page())
+
+    def test_both_filter_sites_apply_it(self):
+        """The tag counts and the list must agree, as with every lens."""
+        self.assertEqual(app_script().count('state.lens === "reception"'), 2)
+
+    def test_the_tag_is_first_on_the_card(self):
+        script = app_script()
+        window = script[script.index("function tags(e)"):]
+        self.assertLess(window.index("if (recep) out.push(recep);"),
+                        window.index("out.push([\"food\", TIER[e.tier]])"))
+        self.assertIn('"Reception to follow"', script)
+
+    def test_it_is_styled_in_every_theme(self):
+        css = publish.TEMPLATE[:publish.TEMPLATE.find("<script>")]
+        self.assertIn(".tag.recep{", css)
+        self.assertIn(".tag.recep.after{", css)
+        self.assertEqual(css.count("--recep:"), 3)
+        self.assertEqual(css.count("--recep-bg:"), 3)
+
+    def test_the_legend_explains_it(self):
+        self.assertIn('<span class="tag recep">', publish.DEFAULT_ABOUT)
+
+    def test_the_rsvp_list_can_show_receptions_only(self):
+        html = self.page()
+        self.assertIn('data-rshow="all"', html)
+        self.assertIn('data-rshow="reception"', html)
+        script = app_script()
+        self.assertIn('read(KEY_RSVP_SHOW, "all")', script)
+        self.assertIn("write(KEY_RSVP_SHOW", script)
+        self.assertIn('["all", "reception"].indexOf(state.rshow)', script)
+
+    def test_the_rsvp_filter_comes_before_the_counting(self):
+        """So the tab numbers say what the list under them holds."""
+        script = app_script()
+        window = script[script.index("function renderRsvps()"):]
+        self.assertLess(window.index('state.rshow !== "reception" || !!r.e.reception'),
+                        window.index("counts[r.track]++"))
+
+    def test_rsvp_rows_carry_the_tag(self):
+        script = app_script()
+        window = script[script.index("function rsvpRow(r)"):]
+        self.assertIn("var recep = recepTag(e);", window[:300])
+
+    def test_the_page_is_handed_it(self):
+        import json
+        data = json.loads(publish.payload([{
+            "id": "e1", "title": "1L Reception", "starts_at": "2099-01-01T18:00:00",
+            "ends_at": None, "all_day": 0, "reception": "reception"}])
+            .replace("<\\/", "</"))[0]
+        self.assertEqual(data["reception"], "reception")
