@@ -514,7 +514,11 @@ h1{font-family:var(--serif);font-weight:500;font-size:clamp(34px,7.5vw,46px);
 /* calendar */
 .cal{margin-top:22px}
 .cal h3{font-family:var(--serif);font-weight:500;font-size:20px;margin:0 0 10px}
-.grid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;
+/* minmax(0,...), not a bare 1fr: a bare 1fr will not narrow below its
+   content, and a title on one line -- the pip's .what -- held its whole
+   day's column 535px wide, pushing the month 2,000px across a 900px window.
+   Squeezed, the title ends in an ellipsis, as it was meant to. */
+.grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:1px;
   background:var(--rule);border:1px solid var(--rule)}
 .dow{background:var(--paper);font-family:var(--mono);font-size:10px;
   letter-spacing:.08em;text-transform:uppercase;color:var(--muted);

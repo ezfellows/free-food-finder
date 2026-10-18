@@ -557,6 +557,16 @@ class TestThePerkTag(unittest.TestCase):
         self.assertNotIn("desc", data)
 
 
+class TestTheMonthFitsTheScreen(unittest.TestCase):
+    def test_a_long_title_cannot_widen_its_day(self):
+        """A bare 1fr will not narrow below its content: one title on one
+        line held its day's column 535px wide and pushed the month 2,000px
+        across a 900px window."""
+        css = publish.TEMPLATE[:publish.TEMPLATE.find("<script>")]
+        rule = [line for line in css.splitlines() if line.startswith(".grid{")][0]
+        self.assertIn("repeat(7,minmax(0,1fr))", rule)
+
+
 class TestReceptions(unittest.TestCase):
     """A tag and a filter of their own, on the docket and in the RSVP list."""
 
