@@ -373,6 +373,10 @@ def upsert(conn: sqlite3.Connection, ev: dict) -> str:
     # refresh report the same rulings as changes, and left the row wrong in
     # between.
     ruled = corrected_fields(conn, row["id"]) & set(payload)
+    # A ruled start owns the all-day flag too; the source that gave no time
+    # must not turn the event back into an all-day one.
+    if "starts_at" in ruled:
+        ruled.add("all_day")
     for k in ruled:
         payload[k] = row[k]
     if ruled & {"title", "starts_at"}:
@@ -739,18 +743,29 @@ def apply_corrections(conn, event_id: str = "") -> int:
             continue                       # a field retired since it was set
         event = conn.execute("SELECT * FROM events WHERE id = ?",
                              (row["event_id"],)).fetchone()
+        if event is None:
+            continue
         # Compared as text. An integer column read back as 1 never equalled
         # the stored "1", so every correction to has_food was re-applied --
         # and reported as a change -- on every single pass.
-        if event is None or str(event[row["field"]] if event[row["field"]]
-                                is not None else "") == str(row["value"] or ""):
+        same = str(event[row["field"]] if event[row["field"]] is not None
+                   else "") == str(row["value"] or "")
+        # A ruled start time settles whether the event is all day: a time
+        # says it is not, a bare date says it is. The flag used to outlive
+        # the ruling -- OPICS's 30 October lunch, ruled 12:30, still printed
+        # "all day", because its email had given no time.
+        day = _all_day_of(row["value"]) if row["field"] == "starts_at" else None
+        stale = day is not None and int(event["all_day"] or 0) != day
+        if same and not stale:
             continue
-        changes = {row["field"]: row["value"]}
+        changes = {} if same else {row["field"]: row["value"]}
+        if stale:
+            changes["all_day"] = day
         # Same reason the caption pass recomputes it: the fingerprint is built
         # from the title and the start date, and a row whose fingerprint no
         # longer matches its own contents stops merging with the calendar's
         # copy of the same event and lands beside it instead.
-        if row["field"] in ("title", "starts_at"):
+        if not same and row["field"] in ("title", "starts_at"):
             fresh = fingerprint(
                 row["value"] if row["field"] == "title" else (event["title"] or ""),
                 row["value"] if row["field"] == "starts_at" else (event["starts_at"] or ""))
@@ -766,6 +781,17 @@ def apply_corrections(conn, event_id: str = "") -> int:
     if applied:
         conn.commit()
     return applied
+
+
+def _all_day_of(starts_at: str):
+    """1 for a bare date, 0 for a time of day, None when midnight leaves it
+    open (an all-day event is stored at 00:00 too)."""
+    value = (starts_at or "").strip()
+    if len(value) == 10:
+        return 1
+    if len(value) >= 16 and value[10] == "T":
+        return None if value[11:16] == "00:00" else 0
+    return None
 
 
 def submission_verdicts(conn) -> dict:

@@ -168,6 +168,14 @@ class TestFolding(unittest.TestCase):
         merge.add(self.conn, self.post)
         self.assertEqual(str(self.only()["has_food"]), "0")
 
+    def test_a_ruled_all_day_event_stays_all_day(self):
+        """A ruling made it all day; a post giving a time must not undo it."""
+        eid = self.only()["id"]
+        store.record_correction(self.conn, eid, "starts_at", "2099-03-10",
+                                "an all-day open house")
+        merge.add(self.conn, dict(self.post, starts_at="2099-03-10T17:00:00"))
+        self.assertEqual(self.only()["all_day"], 1)
+
     def test_the_merge_is_on_record(self):
         merge.add(self.conn, self.post)
         record = self.conn.execute("SELECT * FROM merges").fetchone()

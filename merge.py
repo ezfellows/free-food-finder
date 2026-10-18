@@ -216,8 +216,12 @@ def fold(conn, row, event: dict, reasons=()) -> str:
     merged = ",".join(sorted(s for s in sources if s))
     if merged != current.get("source"):
         changes["source"] = merged
-    # A person's ruling still outranks every source.
-    for k in store.corrected_fields(conn, current["id"]):
+    # A person's ruling still outranks every source, and a ruled start
+    # owns the all-day flag with it.
+    ruled = store.corrected_fields(conn, current["id"])
+    if "starts_at" in ruled:
+        ruled = ruled | {"all_day"}
+    for k in ruled:
         changes.pop(k, None)
     if changes:
         changes["last_seen"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
