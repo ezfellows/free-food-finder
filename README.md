@@ -253,6 +253,12 @@ python3 publish.py data/page.html data/live.html
   out unless a firm is recruiting there.
 - **Details** — dress code, resume collection, RSVP deadlines, a ride voucher
   or travel stipend — are shown when an event states them, and never guessed.
+- **The same event seen twice** is one listing. A group chat's post that
+  repeats an email or flyer -- the same day, start times within 45 minutes,
+  and the same room, most of the same title, or the same organisation --
+  is folded into it (`merge.py`): the email keeps its title and time, and
+  gains the post's room, end time, sign-up link and words. It works in
+  either order; a post stored first is folded in on the next refresh.
 - When sources disagree, a person decides: `./fff correct` records a ruling
   that outranks every source.
 
@@ -274,7 +280,8 @@ python3 publish.py data/page.html data/live.html
 | `./fff posts` | Submissions from the page, with the evidence for each |
 | `./fff titles`, `vet`, `times` | Checks: odd titles, personal content, clock disagreements |
 | `./fff correct <id> <field> <value> "<why>"` | Overrule a source |
-| `./fff add <events.json>` | Add events by hand |
+| `./fff add <events.json>` | Add events by hand; `"source": "groupme"` for one read out of an org's group chat, folded into the email or flyer listing of the same event when there is one |
+| `./fff merges` | Every group-chat post folded into another listing, and why |
 | `./fff test` | Run the tests |
 
 ## Project layout
@@ -290,6 +297,7 @@ score.py        food, with the phrases behind the call
 network.py      networking value; contacts.py finds law firms (data/firms.json)
 campus.py       building, room, and which campus
 details.py      dress code, resume collection, RSVPs, rides and travel paid for
+merge.py        one event seen twice: a chat's post folded into the listing
 dateparse.py    dates and times out of English
 newsletter.py   one bulletin, many events
 caption.py      a flyer's caption against what OCR read

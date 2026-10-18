@@ -278,11 +278,16 @@ PYEOF
     # Events read out of mail by hand -- a newsletter entry the splitter
     # missed -- recorded and scored exactly like everything else. The reading
     # is the reviewer's; the food and networking verdicts are the code's.
+    # "source": "groupme" marks one read out of an org's group chat: it is
+    # folded into the email or flyer listing of the same event when one is
+    # stored (merge.py), and added only when none is.
     # The program goes in via -c, not a heredoc: a heredoc *is* stdin.
     exec "$PY" -c '
-import json, sys, store
+import json, sys, store, merge
+from docket import signup_page
 from score import score_event
 from network import score_network
+SOURCES = ("mail", "groupme")
 if len(sys.argv) < 2 or not sys.argv[1]:
     print("usage: ./fff add <events.json>"); sys.exit(1)
 events = json.load(open(sys.argv[1]))
@@ -292,6 +297,10 @@ for ev in events:
     if missing:
         print("  skipped (missing %s): %r" % (", ".join(missing), ev.get("title")))
         continue
+    source = ev.get("source") or "mail"
+    if source not in SOURCES:
+        print("  skipped (source must be one of %s): %r" % (", ".join(SOURCES), ev["title"]))
+        continue
     text = ev.get("description") or ""
     where = ev.get("location") or ""
     food = score_event(title=ev["title"], description=text, location=where)
@@ -299,18 +308,44 @@ for ev in events:
                         org=ev["org"])
     row = {"title": ev["title"], "starts_at": ev["starts_at"],
            "ends_at": ev.get("ends_at"), "location": where, "org": ev["org"],
-           "description": text, "source": "mail", "all_day": False,
-           "date_confidence": 95}
+           "description": text, "source": source, "all_day": False,
+           "date_confidence": 95,
+           # Only a sign-up page the same for every reader (docket.signup_page).
+           "rsvp_url": ev.get("rsvp_url") if signup_page(ev.get("rsvp_url") or "") else ""}
+    if ev.get("rsvp_url") and not row["rsvp_url"]:
+        print("  link left out (not a known sign-up page): %r" % ev["title"])
     row.update({k: food[k] for k in ("venue_class", "confidence", "tier",
                 "has_food", "meals", "reason", "signals", "rsvp_required",
                 "restricted")})
     row.update({k: net[k] for k in ("network_score", "network_kind", "firms",
                 "practice_areas", "network_reason")})
+    if source == "mail":
+        verdict, reasons = store.upsert(conn, row), []
+    else:
+        verdict, kept, reasons = merge.add(conn, row)
     print("  %-8s %s  %-40s food=%-9s net=%s" % (
-        store.upsert(conn, row), ev["starts_at"][:16], ev["title"][:40],
+        verdict, ev["starts_at"][:16], ev["title"][:40],
         food["tier"], net["network_kind"]))
+    if reasons:
+        title = conn.execute("SELECT title FROM events WHERE id = ?", (kept,)).fetchone()[0]
+        print("           into %s %r: %s" % (kept, title, "; ".join(reasons)))
 conn.commit()
 ' "${2:-}"
+    ;;
+  merges)
+    # Every post folded into another listing of the same event, and why.
+    exec "$PY" - <<'PYEOF'
+import store
+conn = store.connect()
+rows = conn.execute(
+    "SELECT m.*, e.title AS kept_title FROM merges m "
+    "LEFT JOIN events e ON e.id = m.kept_id ORDER BY m.at DESC").fetchall()
+if not rows:
+    print("nothing merged yet")
+for r in rows:
+    print("  %s  %s %r" % (r["starts_at"][:16], r["source"], r["title"]))
+    print("      into %s %r -- %s" % (r["kept_id"], r["kept_title"] or "(gone)", r["reasons"]))
+PYEOF
     ;;
   correct)
     # A human ruling on one field, which outranks both the caption and the
@@ -355,6 +390,6 @@ print("  recorded; later passes will not overwrite it")
 PYEOF
     ;;
   help|-h|--help)
-    echo "usage: ./fff [refresh|build|ingest|mail|mailquery|maillog|sources|broadcast|flyers|titles|posts|senders|vet|reground|times|add|correct|ics|next|school|test]" ;;
-  *) echo "usage: ./fff [refresh|build|ingest|mail|mailquery|maillog|sources|broadcast|flyers|titles|posts|senders|vet|reground|times|add|correct|ics|next|school|test]"; exit 1 ;;
+    echo "usage: ./fff [refresh|build|ingest|mail|mailquery|maillog|sources|broadcast|flyers|titles|posts|senders|vet|reground|times|add|merges|correct|ics|next|school|test]" ;;
+  *) echo "usage: ./fff [refresh|build|ingest|mail|mailquery|maillog|sources|broadcast|flyers|titles|posts|senders|vet|reground|times|add|merges|correct|ics|next|school|test]"; exit 1 ;;
 esac

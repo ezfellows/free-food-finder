@@ -146,6 +146,19 @@ CREATE TABLE IF NOT EXISTS corrections (
     PRIMARY KEY (event_id, field)
 );
 
+-- Each sighting folded into an event it repeats (merge.py): a group chat's
+-- post into the email or flyer listing the same event. Kept so a merge can
+-- be checked, and so the reasons are on record.
+CREATE TABLE IF NOT EXISTS merges (
+    kept_id    TEXT,
+    title      TEXT,
+    source     TEXT,
+    starts_at  TEXT,
+    reasons    TEXT,
+    at         TEXT,
+    PRIMARY KEY (kept_id, title, source)
+);
+
 -- Every address the ingester has ever seen, with the evidence for and against
 -- reading it. Kept because the alternative is a hand-maintained list of
 -- org-sounding words, which goes stale every time a new student org forms and
@@ -506,7 +519,9 @@ def _room(event: dict):
 def listings(conn) -> dict:
     """{slot or room: event id} for every listing a mail copy could repeat.
 
-    Every source but mail, since mail is the one that restates. A dismissed
+    Every source but mail and a group chat, since those are the ones that
+    restate: a post holding a slot would keep out the email it repeats,
+    which says more (merge.py folds the post into it instead). A dismissed
     listing holds nothing. When the flyer's copy is the one a person threw out
     -- MLS's Big Law Panel, GPLA's coffee talk and If/When/How's panel on
     10 Oct 2026, kept from the email instead -- it still held the slot, so
@@ -516,7 +531,8 @@ def listings(conn) -> dict:
     held = {}
     for row in conn.execute(
             "SELECT id, starts_at, org, location FROM events "
-            "WHERE COALESCE(starts_at,'') != '' AND COALESCE(source,'') != 'mail' "
+            "WHERE COALESCE(starts_at,'') != '' "
+            "AND COALESCE(source,'') NOT IN ('mail', 'groupme') "
             "AND NOT COALESCE(dismissed, 0) ORDER BY starts_at"):
         event = dict(row)
         for key in (_slot(event), _room(event)):

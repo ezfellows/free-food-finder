@@ -25,6 +25,7 @@ import campus
 import config
 import details
 import flyers
+import merge
 import school
 import senders
 import store
@@ -37,7 +38,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 # profile's CALENDAR_GROUP_NAMES gives the readable ones. The flyer
 # broadcast's label is the profile's too: "OSL flyer" at Georgetown.
 SOURCE_NAMES = {"livewhale": "Calendar", "mail": "Email", "org": "Org page",
-                "broadcast": "Flyer"}
+                "broadcast": "Flyer", "groupme": "GroupMe"}
 NETWORK_LABELS = {"recruiting": "Recruiting", "firm": "Firm in the room",
                   "practitioner": "Lawyers present", "alumni": "Alumni"}
 TIER_LABELS = {"confirmed": "Food confirmed", "likely": "Food likely",
@@ -296,9 +297,11 @@ def build_events(conn, days: int = 30, min_tier: str = "possible",
         event["location"] = public_text(event.get("location"))
         place = campus.locate(event["location"], group,
                               event.get("description") or "")
-        # Mail and the flyer broadcast are vetted before they reach here, so
-        # an event from either is the school's wherever it is being held.
-        school_source = source in ("mail", "broadcast") or "broadcast" in source
+        # Mail and the flyer broadcast are vetted before they reach here, and
+        # a GroupMe post is added by hand from an org's own chat, so an event
+        # from any of them is the school's wherever it is being held.
+        school_source = (source in ("mail", "broadcast", "groupme")
+                         or "broadcast" in source or "groupme" in source)
         if not campus.keep_event(place, group, event.get("network_kind") or "",
                                  school_source=school_source):
             continue
@@ -451,6 +454,9 @@ def refresh(cfg: dict = None) -> dict:
         results.append(mail.run(conn, cfg))
     if cfg.get("orgs"):
         results.append(orgs.run(conn, cfg))
+    # A chat's post stored before the email or flyer that announces the same
+    # event becomes part of that listing, not a second one.
+    folded = merge.fold_secondhand(conn)
     store.prune(conn)
     flyers.prune(conn)
     # Last, so a source that re-sends a field a person has already ruled on
@@ -459,4 +465,5 @@ def refresh(cfg: dict = None) -> dict:
     conn.close()
     return {"at": datetime.now().isoformat(timespec="seconds"),
             "results": results,
+            "folded_into_another_listing": folded,
             "corrections_reapplied": corrected}
