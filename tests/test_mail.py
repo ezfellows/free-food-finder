@@ -312,3 +312,31 @@ class TestAMailboxNameIsAnAcronym(unittest.TestCase):
     def test_a_long_mailbox_is_left_alone(self):
         self.assertEqual(self.org("lawcareerstrategy@georgetown.edu"),
                          "lawcareerstrategy")
+
+
+class TestADeadlineStillMakesARoundUp(unittest.TestCase):
+    """An email announcing one event and one deadline is still a round-up.
+
+    PPP's "Networking Happy Hour + World of Choices" also asked for a form by
+    Friday. Once the form was refused as a title, the email looked like a
+    one-event message, the happy hour took the subject for its name, and under
+    that name it was listed beside the copy already on the page.
+    """
+
+    RAW = ("From: Chess Club <chessclub@law.georgetown.edu>\n"
+           "To: lawstudents@law.georgetown.edu\n"
+           "List-Id: GULC Announcements <gulc-announce.law.georgetown.edu>\n"
+           "Subject: [Chess Club] Pizza Social + Fall Retreat\n"
+           "Date: Mon, 12 Oct 2026 09:00:00 -0400\n"
+           "Message-ID: <chess-20261012@law.georgetown.edu>\n\n"
+           "Greetings, we have two things to share: our pizza social and the "
+           "fall retreat. | | ## Pizza Social on 10/14 The Chess Club is hosting "
+           "a pizza social on Wednesday, October 14 at 7:00 pm in McDonough 200. "
+           "Pizza will be provided. | | ## Fall Retreat There's still room on the "
+           "fall retreat! Please fill out this form by this Friday (10/16) so we "
+           "know how many of you are coming. |\n")
+
+    def test_the_event_keeps_its_own_name_and_the_deadline_is_not_listed(self):
+        events = mail.messages_to_events(msg(self.RAW))
+        self.assertEqual([(e["title"], e["starts_at"]) for e in events],
+                         [("Pizza social", "2026-10-14T19:00:00")])

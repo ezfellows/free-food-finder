@@ -114,6 +114,38 @@ BULLETIN = re.compile(
     r"\bsave\s+the\s+dates?\b|\bevents?\s+(?:this|next)\s+week\b",
     re.I)
 
+# A deadline is something to do by a time, not somewhere to be at one. "Don't
+# forget to email us your resume by EOD tomorrow" names a thing and a day and
+# passed for a title; what gives it away is a "by" or a "due" with a time
+# after it.
+_WHEN = (r"(?:EOD|EOB|COB|close\s+of\s+business|end\s+of\s+(?:the\s+)?(?:day|week)|"
+         r"noon|midnight|tonight|today|tomorrow|"
+         r"(?:this|next)\s+(?:week(?:end)?|month|"
+         r"(?:mon|tues|wednes|thurs|fri|satur|sun)day)|"
+         r"(?:mon|tues?|wed(?:nes)?|thu(?:rs)?|fri|sat(?:ur)?|sun)(?:day)?\b|"
+         r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d|"
+         r"\d{1,2}(?::\d{2})?\s*[ap]\.?m\.?|\d{1,2}/\d{1,2})")
+DEADLINE = re.compile(r"\b(by|due)\s+(?:(?:by|on)\s+)?" + _WHEN, re.I)
+# ...but not every "by" is one. A visit is no deadline -- "Stop by today for
+# free coffee" -- nor is the host of the event, and an RSVP date on a real
+# event's name -- "Pizza with Latham, RSVP by Friday" -- is left to the checks
+# that already deal with it.
+NOT_A_DEADLINE = re.compile(
+    r"\b(?:stop|drop|come|swing|pop|stopping|dropping|coming|swinging|"
+    r"hosted|sponsored|presented|organi[sz]ed|led|moderated|"
+    r"rsvp|register|registration|sign\s*-?\s*up|respond)\s+$", re.I)
+
+
+def deadline(title: str) -> str:
+    """The words that make this a deadline -- "by EOD", "due 10/3" -- or ""."""
+    for match in DEADLINE.finditer(title or ""):
+        if (match.group(1).lower() == "by"
+                and NOT_A_DEADLINE.search(title[:match.start()])):
+            continue
+        return match.group(0)
+    return ""
+
+
 # A title framed as a question ends on a preposition quite legitimately:
 # "What Hiring Plaintiff Firms Are Looking For", "What Type of IP Law is Right
 # for Me?". The dangling-word check is for fragments, not for these.
@@ -321,7 +353,7 @@ def from_ocr(source: str) -> bool:
     return any(tag in (source or "").lower() for tag in OCR_SOURCES)
 
 
-def assess(title: str, ref=None, source: str = "") -> dict:
+def assess(title: str, ref=None, source: str = "", deadlines: bool = True) -> dict:
     """What is wrong with this title, and why.
 
     Returns `issues` (short reasons), `ok`, and `clean` -- the title with the
@@ -331,6 +363,9 @@ def assess(title: str, ref=None, source: str = "") -> dict:
 
     `source` decides which checks run. Everything reads for sense; only a
     title that came out of OCR is also read for transcription damage.
+
+    `deadlines=False` judges a title as this did before deadlines were
+    refused, for the caller that needs to know a title failed on that alone.
     """
     raw = (title or "").strip()
     issues, clean = [], raw
@@ -355,8 +390,14 @@ def assess(title: str, ref=None, source: str = "") -> dict:
     if DATE_LIKE.match(clean):
         start, _, _, confidence = find_event_datetime(clean, ref)
         is_date = start is not None and confidence >= 60
+    due = deadline(clean) if deadlines and not is_date else ""
     if is_date:
         issues.append("the title is a date, not a name")
+    elif due:
+        # Not mended by taking the date off, so the date stays on: "Cover
+        # letters due 10/3" without it still announces nothing to attend, and
+        # `repair` judging the shortened title would let it through.
+        issues.append(f"a deadline, not an event ({due.strip().lower()!r})")
     else:
         clean, stripped = strip_when(clean)
         if stripped:
@@ -408,7 +449,7 @@ def suspicious(events, ref=None) -> list:
     return out
 
 
-def repair(title: str, ref=None, source: str = "") -> dict:
+def repair(title: str, ref=None, source: str = "", deadlines: bool = True) -> dict:
     """Fix what can be fixed mechanically; report what cannot.
 
     The two passes are the point. A title that is only a banner repeated four
@@ -421,9 +462,9 @@ def repair(title: str, ref=None, source: str = "") -> dict:
     `issues` is what survived the cleaning, and only a non-empty `issues`
     warrants the review queue.
     """
-    first = assess(title, ref, source)
+    first = assess(title, ref, source, deadlines)
     fixed = first["clean"] or (title or "").strip()
-    second = assess(fixed, ref, source)
+    second = assess(fixed, ref, source, deadlines)
     return {"fixed": fixed,
             "issues": second["issues"],
             "ok": not second["issues"],

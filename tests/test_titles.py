@@ -219,3 +219,44 @@ class TestOrdinaryWordsTheDictionaryLacks(unittest.TestCase):
         verdict = titles.assess("Women of Color Collective GBM Picnic",
                                 None, "broadcast")
         self.assertTrue(verdict["ok"], verdict.get("issues"))
+
+
+class TestDeadlines(unittest.TestCase):
+    """Something to do by a time is not somewhere to be at one.
+
+    "Don't forget to email us your resume by EOD tomorrow" names a thing and
+    a day, and passed for a title until the "by" with a time after it was
+    read for what it is.
+    """
+
+    def test_a_deadline_is_not_an_event(self):
+        for title in ("Don't forget to email us your resume by EOD tomorrow",
+                      "Remember to email us your resume by EOD",
+                      "Applications due Friday", "Cover letters due by 5pm",
+                      "1L Rep Application Due 11:59 pm TONIGHT 9/18"):
+            verdict = titles.repair(title, None, "mail")
+            self.assertFalse(verdict["ok"], title)
+            self.assertTrue(verdict["issues"][0].startswith("a deadline"), title)
+
+    def test_taking_the_date_off_does_not_mend_one(self):
+        """Without "10/3", "Cover letters due" still announces nothing."""
+        self.assertFalse(titles.repair("Cover letters due 10/3", None, "mail")["ok"])
+
+    def test_a_visit_is_not_a_deadline(self):
+        for title in ("Stop by Today for Free Coffee", "Drop by Friday for Donuts"):
+            self.assertTrue(titles.repair(title, None, "mail")["ok"], title)
+
+    def test_nor_is_an_rsvp_on_a_real_event(self):
+        self.assertTrue(titles.repair("Pizza with the Chess Club, RSVP by Friday",
+                                      None, "mail")["ok"])
+
+    def test_by_and_due_in_ordinary_names(self):
+        for title in ("Panel hosted by Hale & Partners", "Due Process Clinic Open House",
+                      "Lunch Sponsored by Monday Partners", "Coffee by the Lake",
+                      "Judicial Clerkship Panel - October 1"):
+            self.assertTrue(titles.repair(title, None, "mail")["ok"], title)
+
+    def test_the_old_judgement_is_still_to_be_had(self):
+        """For the caller that must know a title failed on this alone."""
+        self.assertTrue(titles.repair("Remember to email us your resume by EOD",
+                                      None, "mail", deadlines=False)["ok"])

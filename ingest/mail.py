@@ -450,8 +450,13 @@ def messages_to_events(msg, default_ref=None, conn=None, outcome=None) -> list:
     # Pulse and SIPLA's weekly and left every one-event email alone -- Bass
     # Berry, Weil, Fried Frank, Milbank and the LSDAD reminder each split to at
     # most one event, so they keep their better-written subject titles.
-    parts = _events_from_body(msg, default_ref, vetted)
-    if len(parts) >= 2:
+    refused = []
+    parts = _events_from_body(msg, default_ref, vetted, refused)
+    # A deadline the body announces is no event and is not listed, but it was
+    # counted here before it was refused, and still is: "[PPP] Networking
+    # Happy Hour + World of Choices" also asks for a form by Friday. Uncounted,
+    # the happy hour took the subject's name, and under it was listed twice.
+    if len(parts) + len(refused) >= 2:
         return parts
     single = message_to_event(msg, default_ref, vetted)
     if single:
@@ -459,7 +464,7 @@ def messages_to_events(msg, default_ref=None, conn=None, outcome=None) -> list:
     return parts
 
 
-def _events_from_body(msg, default_ref=None, vetted=False) -> list:
+def _events_from_body(msg, default_ref=None, vetted=False, refused=None) -> list:
     subject = SUBJECT_NOISE.sub("", _decode(msg.get("Subject", ""))).strip()
     body = body_text(msg)
     if not vetted and not senders.allowed(msg, f"{subject}\n{body}"):
@@ -474,7 +479,7 @@ def _events_from_body(msg, default_ref=None, vetted=False) -> list:
     # stops, which put the tail of one entry on the front of the next ("edu
     # ADR Bootcamp", "Contact cflo@georgetown.edu CFLO Speed Interviews").
     # Scoring still uses the flat text; only the splitting needs the shape.
-    for part in newsletter.split(body_lines(msg), received):
+    for part in newsletter.split(body_lines(msg), received, refused):
         text = f"{part['title']} {part['detail']}"
         # A bulletin can carry one personal paragraph among five public ones.
         if personal.assess_text(text, bulk)["personal"]:

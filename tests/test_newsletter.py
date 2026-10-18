@@ -332,3 +332,20 @@ class TestAHeadingThatSaysWhen(unittest.TestCase):
                 "at noon.")
         self.assertNotIn("and a resume review clinic",
                          [part["title"] for part in newsletter.split(text, self.REF)])
+
+
+class TestADeadlineIsNoEvent(unittest.TestCase):
+    """A bulletin's reminder to send something by a day is not an event."""
+
+    REF = datetime(2026, 10, 13, 10, 32)
+    TEXT = ("| ## Resume Review Thanks to everyone who came to the mixer! Don't "
+            "forget to email us your resume by EOD tomorrow (10/14) for feedback. |")
+
+    def test_it_is_not_listed(self):
+        self.assertEqual(newsletter.split(self.TEXT, self.REF), [])
+
+    def test_but_the_caller_can_count_it(self):
+        refused = []
+        newsletter.split(self.TEXT, self.REF, refused)
+        self.assertEqual([part["starts_at"] for part in refused],
+                         [datetime(2026, 10, 14)])

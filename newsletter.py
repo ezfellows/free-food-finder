@@ -449,12 +449,16 @@ def _name_from_index(hosts: dict, day, title: str) -> str:
     return ""
 
 
-def segments(text: str, ref=None) -> list:
+def segments(text: str, ref=None, refused=None) -> list:
     """Every event the body describes, in the order it describes them.
 
     Each is `{"title", "detail", "position"}`. Nothing is scored here and no
     date is resolved: that stays with `dateparse` and `score`, so one bulletin
     and one single-event email go through exactly the same judgement.
+
+    An entry whose title is refused for being a deadline, and for nothing
+    else -- "Please fill out this form by this Friday" -- is not an event, and
+    goes to `refused` instead when the caller passes a list.
     """
     body = tidy(text)
     anchors = _anchors(body, ref)
@@ -496,6 +500,13 @@ def segments(text: str, ref=None) -> list:
         if LISTING.search(f"{title} {detail[:160]}"):
             continue
         mend = titles.repair(title, ref, "mail")
+        if not mend["ok"] and titles.deadline(title):
+            passed = titles.repair(title, ref, "mail", deadlines=False)
+            if passed["ok"]:
+                if refused is not None:
+                    refused.append({"title": passed["fixed"], "detail": detail,
+                                    "position": position})
+                continue
         fixed = mend["fixed"] if mend["ok"] else _rescue_from_prose(title, ref)
         if not fixed:
             heading = _heading_ended_by_when(body, begins, position, following, ref)
@@ -597,10 +608,16 @@ def _YEAR_FOR(day, ref=None):
     return (ref or datetime.now()).year
 
 
-def split(text: str, ref=None) -> list:
-    """Segments that also carry a resolved date. Ready to be scored."""
-    events = []
-    for part in segments(text, ref):
+def split(text: str, ref=None, refused=None) -> list:
+    """Segments that also carry a resolved date. Ready to be scored.
+
+    `refused`, when given, receives the deadlines `segments` turned away that
+    carry a date too: each would have been an entry here before deadlines were
+    refused as titles.
+    """
+    events, turned_away = [], []
+    for part in segments(text, ref, turned_away) + [
+            dict(part, refused=True) for part in turned_away]:
         # The date lives at the head of the detail; the title is searched too
         # so "Bar Review ... 9/17 Thurs." still resolves when the date sits in
         # the title's own tail.
@@ -615,6 +632,10 @@ def split(text: str, ref=None) -> list:
             start, end, all_day, confidence = find_event_datetime(
                 f"{part['title']} {part['detail']}", ref)
         if start is None or confidence < 60:
+            continue
+        if part.get("refused"):
+            if refused is not None:
+                refused.append(dict(part, starts_at=start))
             continue
         events.append(dict(part, starts_at=start, ends_at=end,
                            all_day=all_day, date_confidence=confidence))
