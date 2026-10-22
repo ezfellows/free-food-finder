@@ -255,6 +255,126 @@ class TestThePostArrivesFirst(unittest.TestCase):
         self.assertEqual(merge.fold_secondhand(self.conn), 0)
 
 
+class TestTwins(unittest.TestCase):
+    """Two first-hand listings: one event only on the strict test."""
+
+    def test_one_lecture_announced_three_ways(self):
+        a = event(title="Kestrel Lecture on Water Rights", location="Hart Auditorium")
+        b = event(title="2098-2099 Kestrel Lecture on Water Rights: Rivers in a Dry Century",
+                  location="Hart Auditorium")
+        c = event(title='"2098\u20132099 Kestrel Lecture on Water Rights"')
+        self.assertIn("same room", merge.twins(a, b))
+        self.assertTrue(merge.twins(b, c))
+        self.assertTrue(merge.twins(a, c))
+
+    def test_not_twins(self):
+        cases = [
+            # Half an hour apart: a chat post would fold, an email does not.
+            (event(title="Antitrust Careers Panel", starts_at="2099-03-10T17:00:00"),
+             event(title="Antitrust Careers Panel", starts_at="2099-03-10T17:30:00")),
+            # The same session, run in two rooms at once.
+            (event(title="1L Resume Review", location="McDonough 140"),
+             event(title="1L Resume Review", location="Hotung 2000")),
+            # Two lunches at noon, two firms.
+            (event(title="Lunch and Learn with Bracewell", starts_at="2099-03-10T12:00:00"),
+             event(title="Lunch with White & Case", starts_at="2099-03-10T12:00:00")),
+            # The same room and minute, but nothing else in common.
+            (event(title="Public Interest Panel", location="Hart Auditorium"),
+             event(title="Halloween Costume Contest", location="Hart Auditorium")),
+            # Half the shorter title in common is not most of it.
+            (event(title="Antitrust Careers Panel"),
+             event(title="Antitrust Law Society Movie Night")),
+            # No time on one: nothing to say they start together.
+            (event(title="Kestrel Lecture on Water Rights", all_day=True,
+                   starts_at="2099-03-10T00:00:00"),
+             event(title="Kestrel Lecture on Water Rights")),
+        ]
+        for a, b in cases:
+            self.assertEqual(merge.twins(a, b), [], (a["title"], b["title"]))
+
+
+class TestFoldingDuplicates(unittest.TestCase):
+    def setUp(self):
+        self.conn = store.connect(os.path.join(tempfile.mkdtemp(), "twins.db"))
+        self.addCleanup(self.conn.close)
+        self.lecture = event(title="Kestrel Lecture on Water Rights",
+                             starts_at="2099-03-10T16:00:00", location="Hart Auditorium",
+                             description="A reception follows.")
+        store.upsert(self.conn, self.lecture)
+        self.flyer = event(
+            title="2098-2099 Kestrel Lecture on Water Rights: Rivers in a Dry Century",
+            starts_at="2099-03-10T16:00:00", source="broadcast", flyer_id="ab12",
+            description="Refreshments will be served.", tier="confirmed",
+            confidence=95, has_food=True, meals=["snacks"])
+        store.upsert(self.conn, self.flyer)
+        store.upsert(self.conn, event(
+            title='"Who Owns a River?" Kestrel Lecture on Water Rights',
+            starts_at="2099-03-10T16:00:00"))
+        # Not a twin: same minute, nothing in common.
+        store.upsert(self.conn, event(title="Halloween Costume Contest",
+                                      starts_at="2099-03-10T16:00:00"))
+        self.hidden = merge.fold_duplicates(self.conn)
+
+    def shown(self):
+        return [e["title"] for e in docket.build_events(self.conn, days=99999,
+                                                        min_tier="unlikely")]
+
+    def test_one_listing_is_left_and_it_is_the_flyer_s(self):
+        self.assertEqual(self.hidden, 2)
+        kept = [t for t in self.shown() if "Kestrel" in t]
+        self.assertEqual(kept, [self.flyer["title"]])
+        self.assertIn("Halloween Costume Contest", self.shown())
+
+    def test_the_listing_gains_what_the_copies_said(self):
+        row = self.conn.execute("SELECT * FROM events WHERE flyer_id = 'ab12'").fetchone()
+        self.assertIn("A reception follows.", row["description"])
+        self.assertEqual(row["location"], "Hart Auditorium")
+        self.assertTrue(row["has_food"])
+
+    def test_copies_are_hidden_not_deleted_and_on_record(self):
+        hidden = self.conn.execute("SELECT COUNT(*) FROM events WHERE dismissed = 1").fetchone()[0]
+        self.assertEqual(hidden, 2)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM merges").fetchone()[0], 2)
+
+    def test_the_copy_s_email_read_again_stays_hidden(self):
+        store.upsert(self.conn, self.lecture)
+        self.assertEqual(merge.fold_duplicates(self.conn), 0)
+        self.assertEqual([t for t in self.shown() if "Kestrel" in t], [self.flyer["title"]])
+
+    def test_a_ruling_brings_a_copy_back_for_good(self):
+        copy = self.conn.execute("SELECT id FROM events WHERE title = ?",
+                                 (self.lecture["title"],)).fetchone()[0]
+        store.record_correction(self.conn, copy, "dismissed", "0",
+                                "a separate talk, not the lecture")
+        store.apply_corrections(self.conn)
+        self.assertEqual(merge.fold_duplicates(self.conn), 0)
+        self.assertIn(self.lecture["title"], self.shown())
+
+    def test_a_ruled_listing_is_the_one_kept(self):
+        conn = store.connect(os.path.join(tempfile.mkdtemp(), "ruled.db"))
+        self.addCleanup(conn.close)
+        store.upsert(conn, self.flyer)
+        store.upsert(conn, self.lecture)
+        ruled = conn.execute("SELECT id FROM events WHERE title = ?",
+                             (self.lecture["title"],)).fetchone()[0]
+        store.record_correction(conn, ruled, "ends_at", "2099-03-10T17:30:00",
+                                "the email gives the end")
+        self.assertEqual(merge.fold_duplicates(conn), 1)
+        left = conn.execute("SELECT id FROM events WHERE NOT dismissed").fetchall()
+        self.assertEqual([r[0] for r in left], [ruled])
+
+
+    def test_two_ruled_listings_are_left_for_a_person(self):
+        conn = store.connect(os.path.join(tempfile.mkdtemp(), "both.db"))
+        self.addCleanup(conn.close)
+        store.upsert(conn, self.flyer)
+        store.upsert(conn, self.lecture)
+        for eid in [r[0] for r in conn.execute("SELECT id FROM events")]:
+            store.record_correction(conn, eid, "ends_at", "2099-03-10T17:30:00",
+                                    "the email gives the end")
+        self.assertEqual(merge.fold_duplicates(conn), 0)
+
+
 class TestAPostHoldsNoSlot(unittest.TestCase):
     """A post holding a slot would keep out the email it repeats."""
 

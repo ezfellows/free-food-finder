@@ -264,6 +264,10 @@ python3 publish.py data/page.html data/live.html
   is folded into it (`merge.py`): the email keeps its title and time, and
   gains the post's room, end time, sign-up link and words. It works in
   either order; a post stored first is folded in on the next refresh.
+  Two emails, or the calendar and an email, are held to a stricter test --
+  the same minute, most of the same title, and no second room -- and the
+  copy is hidden, not deleted. One wrongly hidden comes back for good with
+  `./fff correct <id> dismissed 0 "<why>"`.
 - When sources disagree, a person decides: `./fff correct` records a ruling
   that outranks every source.
 
@@ -287,7 +291,7 @@ python3 publish.py data/page.html data/live.html
 | `./fff titles`, `vet`, `times` | Checks: odd titles, personal content, clock disagreements |
 | `./fff correct <id> <field> <value> "<why>"` | Overrule a source |
 | `./fff add <events.json>` | Add events by hand; `"source": "groupme"` for one read out of an org's group chat, folded into the email or flyer listing of the same event when there is one |
-| `./fff merges` | Every group-chat post folded into another listing, and why |
+| `./fff merges` | Every group-chat post or duplicate listing folded into another, and why |
 | `./fff test` | Run the tests |
 
 ## Project layout

@@ -121,8 +121,7 @@ def same_event(a: dict, b: dict) -> list:
     room_a, room_b = _place(a), _place(b)
     room = bool(room_a) and room_a == room_b
     shared = _words(a.get("title")) & _words(b.get("title"))
-    shorter = min(len(_words(a.get("title"))), len(_words(b.get("title"))))
-    overlap = len(shared) / shorter if shorter else 0.0
+    overlap = _overlap(a, b)
     org = same_org(a.get("org"), b.get("org")) or bool(
         _org_named_in_title(a, b) or _org_named_in_title(b, a))
 
@@ -136,6 +135,39 @@ def same_event(a: dict, b: dict) -> list:
             or (org and timed and min_a == min_b)):
         return reasons
     return []
+
+
+def _overlap(a: dict, b: dict) -> float:
+    """How much of the shorter title's distinctive words the other shares."""
+    wa, wb = _words(a.get("title")), _words(b.get("title"))
+    shorter = min(len(wa), len(wb))
+    return len(wa & wb) / shorter if shorter else 0.0
+
+
+def twins(a: dict, b: dict) -> list:
+    """Why two first-hand listings are one event, or [].
+
+    Two emails, or the calendar and an email, are sources of equal standing,
+    so neither is folded into the other on the looser test a chat post meets.
+    They must start at the very same minute and share most of the shorter
+    title's distinctive words -- "Drinan Lecture on Human Rights" and
+    "2026-2027 Drinan Lecture on Human Rights: Racial Justice" -- and must
+    not name two different rooms.
+    """
+    day_a, min_a = _start(a)
+    day_b, min_b = _start(b)
+    if not day_a or day_a != day_b or min_a is None or min_a != min_b:
+        return []
+    room_a, room_b = _place(a), _place(b)
+    if room_a and room_b and room_a != room_b:
+        return []
+    if _overlap(a, b) < 0.6:
+        return []
+    shared = _words(a.get("title")) & _words(b.get("title"))
+    reasons = ["same day", "same time", "titles share " + ", ".join(sorted(shared))]
+    if room_a and room_a == room_b:
+        reasons.insert(2, "same room")
+    return reasons
 
 
 def _org_named_in_title(a: dict, b: dict) -> bool:
@@ -287,6 +319,59 @@ def fold_secondhand(conn) -> int:
         conn.commit()
         folded += 1
     return folded
+
+
+def fold_duplicates(conn) -> int:
+    """Hide each first-hand listing that is a twin of another (`twins`),
+    folded into it. Returns how many.
+
+    The copy is hidden, not deleted: its email is read again on every
+    refresh, and a deleted row would simply come back. The listing kept is
+    the one a person has ruled on, else the one with a flyer, else the one
+    seen first, so the choice does not change from day to day. A listing
+    with a ruling of its own is never hidden; a fold that was wrong is
+    undone for good with `./fff correct <id> dismissed 0 "<why>"`. Each fold
+    is recorded in the `merges` table, for `./fff merges`.
+    """
+    rows = [dict(r) for r in conn.execute(
+        "SELECT * FROM events WHERE NOT COALESCE(dismissed, 0) "
+        "AND NOT COALESCE(all_day, 0) AND COALESCE(starts_at, '') != '' "
+        "AND starts_at >= date('now', '-1 day')")]
+    rows = [r for r in rows if not _secondhand(r["source"])]
+    fields = {r["id"]: store.corrected_fields(conn, r["id"]) for r in rows}
+    # Ruled back onto the page is ruled a separate event: kept out entirely.
+    rows = [r for r in rows if "dismissed" not in fields[r["id"]]]
+    ruled = {r["id"] for r in rows if fields[r["id"]]}
+    rows.sort(key=lambda r: (r["id"] not in ruled, not r.get("flyer_id"),
+                             r.get("first_seen") or "", r["id"]))
+    hidden = set()
+    for i, keep in enumerate(rows):
+        if keep["id"] in hidden:
+            continue
+        # A copy may match the kept listing only through another copy: the
+        # flyer's full title and a short one, both twins of the plain name.
+        group = [keep]
+        grew = True
+        while grew:
+            grew = False
+            for copy in rows[i + 1:]:
+                if copy["id"] in hidden or copy["id"] in ruled:
+                    continue
+                reasons = next((r for r in (twins(m, copy) for m in group) if r), [])
+                if not reasons:
+                    continue
+                group.append(copy)
+                grew = True
+                current = conn.execute("SELECT * FROM events WHERE id = ?",
+                                       (keep["id"],)).fetchone()
+                fold(conn, current, _sighting(copy), reasons)
+                conn.execute("UPDATE flyers SET event_id = ? WHERE event_id = ?",
+                             (keep["id"], copy["id"]))
+                conn.execute("UPDATE events SET dismissed = 1 WHERE id = ?",
+                             (copy["id"],))
+                conn.commit()
+                hidden.add(copy["id"])
+    return len(hidden)
 
 
 def _sighting(row: dict) -> dict:

@@ -461,6 +461,9 @@ def refresh(cfg: dict = None) -> dict:
     # A chat's post stored before the email or flyer that announces the same
     # event becomes part of that listing, not a second one.
     folded = merge.fold_secondhand(conn)
+    # One talk announced by three offices, under three titles, is one
+    # listing; the copies are hidden, not deleted, so a re-read keeps them so.
+    twins = merge.fold_duplicates(conn)
     store.prune(conn)
     flyers.prune(conn)
     # Last, so a source that re-sends a field a person has already ruled on
@@ -470,4 +473,5 @@ def refresh(cfg: dict = None) -> dict:
     return {"at": datetime.now().isoformat(timespec="seconds"),
             "results": results,
             "folded_into_another_listing": folded,
+            "duplicates_hidden": twins,
             "corrections_reapplied": corrected}

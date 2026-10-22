@@ -347,7 +347,7 @@ conn.commit()
 ' "${2:-}"
     ;;
   merges)
-    # Every post folded into another listing of the same event, and why.
+    # Every post or duplicate listing folded into another, and why.
     exec "$PY" - <<'PYEOF'
 import store
 conn = store.connect()
