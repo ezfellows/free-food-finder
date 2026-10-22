@@ -18,6 +18,20 @@ case "${1:-help}" in
   # live inside it -- the page republishes itself when someone posts -- so a
   # rebuild that does not read it back wipes every post.
   build)   exec "$PY" publish.py "${2:-data/page.html}" "${3:-data/live.html}" ;;
+  # ...and this is how it is kept: the Artifact tool saves the page it read
+  # to a file of its own, and `live` copies it to data/live.html once it is
+  # plainly this site's page. Anything else is refused and the last copy kept.
+  live)
+    exec "$PY" -c '
+import json, sys, publish
+if len(sys.argv) < 2 or not sys.argv[1]:
+    print("usage: ./fff live <the file the Artifact tool saved the page to>"); sys.exit(1)
+try:
+    print(json.dumps(publish.save_live(sys.argv[1]), indent=1))
+except (OSError, ValueError) as exc:
+    print("not saved: %s" % exc); sys.exit(1)
+' "${2:-}"
+    ;;
   ics)     exec "$PY" -c "import docket, store; print(docket.build_ics(store.connect()))" ;;
   test)    exec "$PY" -m unittest discover -s tests -t . -v ;;
   next)
@@ -390,6 +404,6 @@ print("  recorded; later passes will not overwrite it")
 PYEOF
     ;;
   help|-h|--help)
-    echo "usage: ./fff [refresh|build|ingest|mail|mailquery|maillog|sources|broadcast|flyers|titles|posts|senders|vet|reground|times|add|merges|correct|ics|next|school|test]" ;;
-  *) echo "usage: ./fff [refresh|build|ingest|mail|mailquery|maillog|sources|broadcast|flyers|titles|posts|senders|vet|reground|times|add|merges|correct|ics|next|school|test]"; exit 1 ;;
+    echo "usage: ./fff [refresh|build|live|ingest|mail|mailquery|maillog|sources|broadcast|flyers|titles|posts|senders|vet|reground|times|add|merges|correct|ics|next|school|test]" ;;
+  *) echo "usage: ./fff [refresh|build|live|ingest|mail|mailquery|maillog|sources|broadcast|flyers|titles|posts|senders|vet|reground|times|add|merges|correct|ics|next|school|test]"; exit 1 ;;
 esac

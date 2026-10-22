@@ -1928,17 +1928,8 @@ def carried_submissions(path: str = None, verdicts: dict = None) -> dict:
             html = fh.read()
     except OSError:
         return {"posts": [], "blocked": []}
-    marker = '<script type="application/json" id="submitted-data">'
-    start = html.find(marker)
-    if start < 0:
-        return {"posts": [], "blocked": []}
-    start += len(marker)
-    end = html.find("</script>", start)
-    try:
-        state = json.loads(html[start:end])
-    except ValueError:
-        return {"posts": [], "blocked": []}
-    if not isinstance(state, dict) or not isinstance(state.get("posts"), list):
+    state = _submitted_state(html)
+    if state is None:
         return {"posts": [], "blocked": []}
     state.setdefault("blocked", [])
     if verdicts:
@@ -1947,6 +1938,50 @@ def carried_submissions(path: str = None, verdicts: dict = None) -> dict:
             if (verdicts.get(str(p.get("id")), {}) or {}).get("verdict", "")
             not in ("verified", "rejected")]
     return state
+
+
+SUBMITTED_BLOCK = '<script type="application/json" id="submitted-data">'
+
+
+def _submitted_state(html: str):
+    """The page's submissions block, parsed, or None when it has none."""
+    start = html.find(SUBMITTED_BLOCK)
+    if start < 0:
+        return None
+    start += len(SUBMITTED_BLOCK)
+    end = html.find("</script>", start)
+    try:
+        state = json.loads(html[start:end])
+    except ValueError:
+        return None
+    if not isinstance(state, dict) or not isinstance(state.get("posts"), list):
+        return None
+    return state
+
+
+def save_live(source: str, dest: str = None) -> dict:
+    """Keep the page as published, before a rebuild: the submissions live in it.
+
+    The Artifact tool saves the page it reads to a file of its own, and the
+    routine's step 2 copies it here. It goes through this rather than `cp` so
+    the step is one fixed command an unattended run can be allowed to make,
+    and so nothing but this site's page, its submissions block readable, can
+    take the place of the copy kept last time.
+    """
+    dest = (dest or os.environ.get("FFF_LIVE")
+            or os.path.join(ROOT, "data", "live.html"))
+    with open(source, encoding="utf-8") as fh:
+        html = fh.read()
+    state = _submitted_state(html)
+    if state is None:
+        raise ValueError("not this site's page: no readable submissions block")
+    part = dest + ".part"
+    with open(part, "w", encoding="utf-8") as fh:
+        fh.write(html)
+    os.replace(part, dest)
+    return {"saved": dest, "bytes": len(html.encode("utf-8")),
+            "posts": len(state["posts"]),
+            "blocked": len(state.get("blocked") or [])}
 
 
 def main():

@@ -294,6 +294,20 @@ class TestSavingWhatTheConnectorReturned(unittest.TestCase):
         self.assertTrue(senders.to_a_listserv(msg))
         self.assertIn("Lunch will be provided", msg.get_payload(decode=True).decode())
 
+    def test_fields_in_a_file_are_saved_as_stdin_would_save_them(self):
+        """The scheduled run writes this file with its file tool, not a heredoc."""
+        path = self.result([
+            {"id": "gm-5e6f", "sender": "cflo@georgetown.edu",
+             "to": ["reader1@georgetown.edu"], "subject": "Next Week with CFLO!",
+             "date": "2026-10-08T15:00:00Z", "body": "Pizza at noon. Unsubscribe"},
+            {"id": "gm-7a8b", "sender": "lawsba@georgetown.edu",
+             "to": ["reader1@georgetown.edu"], "subject": "Bar Review",
+             "body": "Drinks provided. Unsubscribe"}])
+        saved = self.make_eml.from_items(path)
+        self.assertEqual([os.path.basename(p) for p in saved],
+                         ["gm-5e6f.eml", "gm-7a8b.eml"])
+        self.assertTrue(all(os.path.dirname(p) == self.out for p in saved))
+
 
 class TestTheCommand(unittest.TestCase):
     def run_fff(self, *args, stdin=None):
@@ -315,6 +329,20 @@ class TestTheCommand(unittest.TestCase):
             [{"id": "zz9", "sender": "lawsba@georgetown.edu", "subject": "Bar Review"}]))
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(json.loads(out.stdout)["fetch"], ["zz9"])
+        self.assertNotIn("next_page_token", json.loads(out.stdout))
+
+    def test_select_gives_a_saved_search_its_next_page(self):
+        path = os.path.join(tempfile.mkdtemp(), "search.txt")
+        with open(path, "w") as fh:
+            json.dump({"threads": [{"id": "t1", "messages": [
+                {"id": "zz8", "sender": "lawsba@georgetown.edu",
+                 "subject": "Bar Review"}]}],
+                "nextPageToken": "page-2-token"}, fh)
+        out = self.run_fff("--select", path)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        got = json.loads(out.stdout)
+        self.assertEqual(got["fetch"], ["zz8"])
+        self.assertEqual(got["next_page_token"], "page-2-token")
 
     def test_it_is_listed_in_the_usage(self):
         with open(os.path.join(ROOT, "fff")) as fh:

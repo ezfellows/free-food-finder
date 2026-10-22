@@ -13,6 +13,7 @@ referenced from the HTML. A RAW result is far too large to come back inline,
 so the harness saves it to a file, and `--from-result` takes that file.
 
     python3 tools/make_eml.py < items.json           fields, as a JSON list
+    python3 tools/make_eml.py --items FILE...        the same, from files
     python3 tools/make_eml.py --from-result FILE...  a saved connector result
 """
 import base64
@@ -84,10 +85,26 @@ def from_result(path: str) -> str:
                   "body": data.get("plaintextBody") or ""})
 
 
+def from_items(path: str) -> list:
+    """Save every message in a file of fields, as a JSON list on stdin.
+
+    The scheduled run writes the file with its own file tool: a command with
+    no heredoc in it is one an unattended run can be allowed to make.
+    """
+    with open(path, encoding="utf-8") as fh:
+        items = json.load(fh)
+    return [build(item) for item in (items if isinstance(items, list) else [items])]
+
+
 if __name__ == "__main__":
     if sys.argv[1:2] == ["--from-result"]:
         for name in sys.argv[2:]:
             print(from_result(name))
+        sys.exit(0)
+    if sys.argv[1:2] == ["--items"]:
+        for name in sys.argv[2:]:
+            for path in from_items(name):
+                print(path)
         sys.exit(0)
     items = json.load(sys.stdin)
     for item in items if isinstance(items, list) else [items]:

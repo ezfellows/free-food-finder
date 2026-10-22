@@ -5,6 +5,7 @@ in code or even in a comment -- the build splices the entire event feed into
 the middle of the script and the page dies with a syntax error. It happened
 once; this stops it happening again.
 """
+import json
 import os
 import re
 import sys
@@ -111,6 +112,70 @@ class TestSubmissionsSurviveARebuild(unittest.TestCase):
         with open(path, "w") as fh:
             fh.write("<html><body>not our page</body></html>")
         self.assertEqual(publish.carried_submissions(path)["posts"], [])
+
+
+class TestKeepingTheLivePage(unittest.TestCase):
+    """`./fff live`: the copy of the published page a rebuild reads posts
+    from. Unlike reading it, keeping it fails loudly: a wrong file must never
+    replace the last good copy."""
+
+    built_page = TestSubmissionsSurviveARebuild.built_page
+
+    def setUp(self):
+        import tempfile
+        self.dest = os.path.join(tempfile.mkdtemp(), "live.html")
+        with open(self.dest, "w", encoding="utf-8") as fh:
+            fh.write("the copy kept last time")
+
+    def test_the_page_is_kept_with_its_counts(self):
+        state = {"posts": [{"id": "a3", "by": "x", "title": "Bagels",
+                            "start": "2099-01-01T12:00", "place": "", "note": "",
+                            "link": "", "at": ""}], "blocked": ["spammer"]}
+        source = self.built_page(state)
+        got = publish.save_live(source, self.dest)
+        self.assertEqual((got["posts"], got["blocked"]), (1, 1))
+        with open(source, encoding="utf-8") as a, open(self.dest, encoding="utf-8") as b:
+            self.assertEqual(a.read(), b.read())
+        self.assertEqual(publish.carried_submissions(self.dest)["posts"], state["posts"])
+        self.assertFalse(os.path.exists(self.dest + ".part"))
+
+    def test_anything_else_is_refused_and_the_last_copy_kept(self):
+        import tempfile
+        for text in ("<html><body>not our page</body></html>",
+                     '<script type="application/json" id="submitted-data">{oops</script>'):
+            source = os.path.join(tempfile.mkdtemp(), "other.html")
+            with open(source, "w") as fh:
+                fh.write(text)
+            with self.assertRaises(ValueError):
+                publish.save_live(source, self.dest)
+            with open(self.dest, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), "the copy kept last time")
+            self.assertFalse(os.path.exists(self.dest + ".part"))
+
+    def test_the_command_keeps_and_refuses(self):
+        """Pointed at a scratch copy (FFF_LIVE), so that even a broken
+        refusal can never overwrite your real data/live.html."""
+        import subprocess
+        import tempfile
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        env = dict(os.environ, FFF_LIVE=self.dest)
+
+        def live(*args):
+            return subprocess.run([os.path.join(root, "fff"), "live", *args],
+                                  capture_output=True, text=True, env=env)
+
+        source = os.path.join(tempfile.mkdtemp(), "other.html")
+        with open(source, "w") as fh:
+            fh.write("<html><body>not our page</body></html>")
+        for args in ([source], []):
+            out = live(*args)
+            self.assertEqual(out.returncode, 1, out.stdout + out.stderr)
+        self.assertIn("not saved", live(source).stdout)
+        with open(self.dest, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "the copy kept last time")
+        out = live(self.built_page({"posts": [], "blocked": []}))
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(json.loads(out.stdout)["saved"], self.dest)
 
 
 class TestScriptIsNotClosedEarly(unittest.TestCase):

@@ -33,7 +33,8 @@ copied out by hand, so those are read as plain text, which keeps every word.
 broadcasts ./fff broadcast has not read yet, so none is processed twice.
 
     ./fff mailquery                    the searches, one per line
-    ./fff mailquery --select FILE      which messages to fetch (JSON in, JSON out)
+    ./fff mailquery --select FILE      which messages to fetch (JSON in, JSON out),
+                                       and the search's next page token if any
     ./fff mailquery --broadcasts EML...  saved broadcasts not yet processed
     ./fff mailquery --done             record a successful pull
 """
@@ -316,7 +317,13 @@ def main(argv: list) -> int:
     if argv[:1] == ["--select"]:
         source = argv[1] if len(argv) > 1 else "-"
         raw = sys.stdin.read() if source == "-" else open(source, encoding="utf-8").read()
-        print(json.dumps(select(_flatten(json.loads(raw)), conn), indent=1))
+        payload = json.loads(raw)
+        chosen = select(_flatten(payload), conn)
+        # A search saved to a file is read by nothing else here, so its page
+        # token comes back too: the same search again, from that page.
+        if isinstance(payload, dict) and payload.get("nextPageToken"):
+            chosen["next_page_token"] = payload["nextPageToken"]
+        print(json.dumps(chosen, indent=1))
         return 0
     if argv[:1] == ["--broadcasts"]:
         for path in unprocessed_broadcasts(argv[1:], conn):

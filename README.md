@@ -237,9 +237,12 @@ filter and the RSVP list's All / Receptions switch show only those.
 Published as a [Claude Artifact](https://claude.ai), the page can also take
 **submissions**: classmates with edit access post events, and the page
 republishes itself with them. Every rebuild must then be given the live page,
-or the posts are lost; the scheduled routine does this for you:
+or the posts are lost; the scheduled routine does this for you. It keeps the
+page the Artifact tool read with `./fff live`, which refuses any file that is
+not this site's page, then rebuilds from it:
 
 ```bash
+./fff live <the file the Artifact tool saved the page to>
 python3 publish.py data/page.html data/live.html
 ```
 
@@ -272,6 +275,7 @@ python3 publish.py data/page.html data/live.html
 | `./fff refresh` | Read every source into the event log |
 | `./fff next` | What's on, with food, in the terminal |
 | `./fff build` | Write the page |
+| `./fff live <file>` | Keep the published page, submissions and all, as `data/live.html` |
 | `./fff ics` | The calendar file |
 | `./fff mailquery` | The Gmail searches that fill `data/maildrop/` |
 | `./fff maillog` | Every email read, and what became of it |
