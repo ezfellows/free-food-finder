@@ -114,6 +114,19 @@ BULLETIN = re.compile(
     r"\bsave\s+the\s+dates?\b|\bevents?\s+(?:this|next)\s+week\b",
     re.I)
 
+# A sentence from the body of an email is not a name either. A newsletter
+# split at the wrong line takes the line before an entry as its title: the
+# APALSA letter's Public Sector 101 panel was listed as "In other news, we
+# have APALSO-WEEN next Friday". What gives it away is how it talks -- an
+# aside to open with, "we have", "there will be".
+CHATTER = re.compile(
+    r"^\s*(?:in\s+other\s+news|also|and\s+finally|don['\u2019]?t\s+forget|"
+    r"as\s+always|(?:as\s+a|just\s+a|a\s+quick|quick)\s+reminder|"
+    r"hi|hello|hey|dear|thanks|thank\s+you|please|make\s+sure|be\s+sure)\b|"
+    r"\bwe\s+(?:have|are|will|would|hope|want|can)\b|\bwe['\u2019](?:re|ll|ve)\b|"
+    r"\bthere\s+(?:will\s+be|is|are)\b|\bthere['\u2019]s\b",
+    re.I)
+
 # A deadline is something to do by a time, not somewhere to be at one. "Don't
 # forget to email us your resume by EOD tomorrow" names a thing and a day and
 # passed for a title; what gives it away is a "by" or a "due" with a time
@@ -430,6 +443,13 @@ def assess(title: str, ref=None, source: str = "", deadlines: bool = True) -> di
     if bulletin:
         issues.append("reads like a newsletter subject, not an event "
                       f"({bulletin.group(0).strip().lower()!r})")
+    # "Don't forget to send us your resume by Friday" is a sentence because
+    # it is a reminder; judged as before deadlines were refused, it is judged
+    # as before this was looked for too, or a refused deadline goes uncounted.
+    chatter = CHATTER.search(clean) if deadlines else None
+    if chatter:
+        issues.append("reads like a sentence from the email, not a name "
+                      f"({chatter.group(0).strip().lower()!r})")
 
     trailing_number = re.search(r"\s(\d{1,3})$", clean)
     if trailing_number and len(words) <= 3:

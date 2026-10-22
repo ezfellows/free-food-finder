@@ -221,6 +221,33 @@ class TestOrdinaryWordsTheDictionaryLacks(unittest.TestCase):
         self.assertTrue(verdict["ok"], verdict.get("issues"))
 
 
+class TestSentencesFromTheEmail(unittest.TestCase):
+    """A newsletter split at the wrong line takes the sentence before an entry
+    as its title. Every name and event here is invented."""
+
+    def sentence(self, title):
+        return [i for i in titles.assess(title, None, "mail")["issues"]
+                if i.startswith("reads like a sentence")]
+
+    def test_how_a_sentence_talks(self):
+        for title in ("In other news, we have Trivia-ween next Friday",
+                      "We\u2019re excited to invite you to our upcoming Resume Review",
+                      "A quick reminder that the Big Law Panel is",
+                      "Hi all, the Kestrel Society GBM",
+                      "There will be pizza at the Chess Club GBM",
+                      "Speaking of events, we'll be hosting a Moot Court Mixer"):
+            self.assertTrue(self.sentence(title), title)
+
+    def test_names_that_merely_talk_to_you(self):
+        for title in ("Catch Me If You Can: Can Satellites Track Illegal Fishing?",
+                      "So You Think You Want to Clerk?",
+                      "You're Invited: 1L Reception with Hale & Partners",
+                      "We the People: A Constitution Day Reading",
+                      "Hiking Club Info Session", "Thanksgiving Potluck",
+                      "Panel on Trade Remedies next Wednesday"):
+            self.assertEqual(self.sentence(title), [], title)
+
+
 class TestDeadlines(unittest.TestCase):
     """Something to do by a time is not somewhere to be at one.
 
