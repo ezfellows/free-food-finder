@@ -375,6 +375,134 @@ class TestFoldingDuplicates(unittest.TestCase):
         self.assertEqual(merge.fold_duplicates(conn), 0)
 
 
+class TestOneEventUnderTwoNames(unittest.TestCase):
+    """Same minute, different titles: one event when the rare words or the
+    whole text say so. Every name, firm and room is invented."""
+
+    FILLER = [  # what an inbox is mostly made of, so "panel" counts for little
+        ("Antitrust Careers Panel", "Join practising attorneys for a panel and lunch."),
+        ("ACS General Body Meeting", "Our GBM, with pizza. RSVP please."),
+        ("1L Networking Reception", "Meet attorneys at a networking reception."),
+        ("Health Law Panel", "A panel of attorneys on health law careers."),
+        ("Moot Court Info Session", "Information session for 1Ls, lunch provided."),
+        ("Pro Bono Fair", "Meet pro bono organisations and attorneys."),
+        ("Study Break", "Snacks in the atrium for everyone."),
+        ("Career Panel and Happy Hour", "A panel, then a happy hour with attorneys."),
+    ]
+
+    TEMPLATE = ("The Office of Career Strategy invites 1Ls to an evening reception at "
+                "the firm's Washington office. Business casual. Transportation vouchers "
+                "will be provided to registered students. Space is limited; register "
+                "through the career portal.")
+
+    def setUp(self):
+        self.conn = store.connect(os.path.join(tempfile.mkdtemp(), "alike.db"))
+        self.addCleanup(self.conn.close)
+        for i, (title, text) in enumerate(self.FILLER):
+            store.upsert(self.conn, event(title=title, description=text,
+                                          starts_at="2099-04-%02dT12:00:00" % (i + 1)))
+
+    def store(self, **kw):
+        e = event(**kw)
+        store.upsert(self.conn, e)
+        return e
+
+    def alike(self, a, b):
+        return merge.alike(a, b, merge.rarity(self.conn))
+
+    def test_a_rare_name_in_both_titles(self):
+        a = self.store(title="Howdy Hoyas: Meet Austin Firm Kestrel & Vane Tomorrow!",
+                       location="McDonough Hall", org="Texas Club",
+                       description="Meet Kestrel & Vane attorneys over drinks.")
+        b = self.store(title="Kestrel & Vane Health Law Q&A + Happy Hour",
+                       location="McDonough Hall", org="Health Law Society",
+                       description="A Q&A with Kestrel & Vane, then a happy hour.")
+        self.assertIn("titles share kestrel, vane", self.alike(a, b))
+
+    def test_the_same_words_under_a_broken_title(self):
+        text = ("The Chess Club is holding its long-overdue general body meeting "
+                "on Thursday at 5pm in McDonough 205, with Bishop's Pizza.")
+        a = self.store(title="Chess Club General Body Meeting", description=text)
+        b = self.store(title="Long-overdue GBM next", description=text)
+        self.assertTrue(self.alike(a, b))
+
+    def test_one_room_under_two_names(self):
+        a = self.store(title="Choosing a Practice Group with Hale & Partners",
+                       location="111 Mass Ave NW Multipurpose Room")
+        b = self.store(title="Hale & Partners Choosing a Practice Group Panel",
+                       location="111 Mass Ave NW LL201")
+        self.assertTrue(self.alike(a, b))
+
+    def test_not_one_event(self):
+        cases = [
+            # Two language tables at noon.
+            (dict(title="Spanish Conversation Table", description="Practise Spanish over coffee."),
+             dict(title="Tavola di Conversazione", description="Chiacchiere e caffe, in italiano.")),
+            # The same words, in two buildings.
+            (dict(title="Kestrel & Vane Reception", location="McDonough 140"),
+             dict(title="Kestrel & Vane Reception Remarks", location="Hotung 2000")),
+            # The same template, two firms: 61% alike, and still two events.
+            (dict(title="Hale & Partners 1L Reception", firms=[{"name": "Hale & Partners"}],
+                  description="Hale & Partners. " + self.TEMPLATE),
+             dict(title="Ward Quill 1L Reception", firms=[{"name": "Ward Quill"}],
+                  description="Ward Quill. " + self.TEMPLATE)),
+            # Two rooms of one building, and titles alike but not near-identical.
+            (dict(title="Kestrel Vane Moot Court Practice Round", location="McDonough 140"),
+             dict(title="Kestrel Vane Moot Court Final Round", location="McDonough 205")),
+            # One organisation's two events: one word in common is its name.
+            (dict(title="Kestrel Society Mixer", location="McDonough 140"),
+             dict(title="Kestrel Society Board Elections", location="McDonough 205")),
+            # Half an hour apart.
+            (dict(title="Kestrel & Vane Q&A", starts_at="2099-03-10T17:00:00"),
+             dict(title="Kestrel & Vane Q&A and Reception", starts_at="2099-03-10T17:30:00")),
+        ]
+        for a, b in cases:
+            self.assertEqual(self.alike(self.store(**a), self.store(**b)), [],
+                             (a["title"], b["title"]))
+
+    def test_a_rare_name_is_folded_where_the_titles_alone_are_not(self):
+        a = self.store(title="Howdy Hoyas: Meet Austin Firm Kestrel & Vane Tomorrow!",
+                       location="McDonough Hall",
+                       description="Meet Kestrel & Vane attorneys over drinks.")
+        b = self.store(title="Kestrel & Vane Health Law Q&A + Happy Hour",
+                       location="McDonough Hall",
+                       description="A Q&A with Kestrel & Vane, then a happy hour.")
+        self.assertEqual(merge.twins(a, b), [])
+        self.assertEqual(merge.fold_duplicates(self.conn), 1)
+
+    def test_the_copy_is_hidden_and_the_better_title_kept(self):
+        text = ("The Chess Club is holding its long-overdue general body meeting "
+                "on Thursday at 5pm in McDonough 205, with Bishop's Pizza.")
+        self.store(title="In other news, we have the Chess Club GBM", description=text)
+        self.store(title="Chess Club General Body Meeting", description=text)
+        # The broken one was seen first, which would otherwise decide it.
+        self.conn.execute("UPDATE events SET first_seen = '2000-01-01' WHERE title LIKE 'In other%'")
+        self.conn.commit()
+        self.assertEqual(merge.fold_duplicates(self.conn), 1)
+        left = [r[0] for r in self.conn.execute(
+            "SELECT title FROM events WHERE NOT dismissed AND starts_at LIKE '2099-03-10%'")]
+        self.assertEqual(left, ["Chess Club General Body Meeting"])
+
+    def test_close_but_not_enough_goes_to_a_person(self):
+        a = self.store(title="Ward Quill Restructuring 1L Reception",
+                       description="Meet Ward Quill restructuring attorneys. RSVP by Friday.")
+        b = self.store(title="Kestrel Society October Meeting",
+                       description="Our October meeting, then the Ward Quill restructuring "
+                                   "reception. RSVP by Friday.")
+        self.assertEqual(self.alike(a, b), [])
+        self.assertEqual(merge.fold_duplicates(self.conn), 0)
+        pairs = merge.possible_duplicates(self.conn)
+        self.assertEqual([{p[0]["title"], p[1]["title"]} for p in pairs],
+                         [{a["title"], b["title"]}])
+
+    def test_a_pair_ruled_apart_is_not_raised_again(self):
+        self.test_close_but_not_enough_goes_to_a_person()
+        eid = self.conn.execute("SELECT id FROM events WHERE title = ?",
+                                ("Kestrel Society October Meeting",)).fetchone()[0]
+        store.record_correction(self.conn, eid, "dismissed", "0", "two events")
+        self.assertEqual(merge.possible_duplicates(self.conn), [])
+
+
 class TestAPostHoldsNoSlot(unittest.TestCase):
     """A post holding a slot would keep out the email it repeats."""
 
@@ -463,6 +591,26 @@ class TestTheAddCommand(unittest.TestCase):
             conn, days=99999, min_tier="unlikely")}
         self.assertTrue(tba["Dinner Reception with Hale & Partners"])
         self.assertFalse(tba["Kestrel Open House"])
+
+
+    def test_dupes_lists_what_may_be_one_event(self):
+        conn = store.connect(self.db)
+        for i, (title, text) in enumerate(TestOneEventUnderTwoNames.FILLER):
+            store.upsert(conn, event(title=title, description=text,
+                                     starts_at="2099-04-%02dT12:00:00" % (i + 1)))
+        for title, text in (("Ward Quill Restructuring 1L Reception",
+                             "Meet Ward Quill restructuring attorneys. RSVP by Friday."),
+                            ("Kestrel Society October Meeting",
+                             "Our October meeting, then the Ward Quill restructuring "
+                             "reception. RSVP by Friday.")):
+            store.upsert(conn, event(title=title, description=text,
+                                     starts_at="2099-03-11T18:00:00"))
+        conn.close()
+        out = subprocess.run([os.path.join(ROOT, "fff"), "dupes"], capture_output=True,
+                             text=True, env=self.env, timeout=60)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("Kestrel Society October Meeting", out.stdout)
+        self.assertIn("1 pair(s) that may be one event", out.stdout)
 
 
 if __name__ == "__main__":

@@ -266,8 +266,12 @@ python3 publish.py data/page.html data/live.html
   either order; a post stored first is folded in on the next refresh.
   Two emails, or the calendar and an email, are held to a stricter test --
   the same minute, most of the same title, and no second room -- and the
-  copy is hidden, not deleted. One wrongly hidden comes back for good with
-  `./fff correct <id> dismissed 0 "<why>"`.
+  copy is hidden, not deleted. So are two at the same minute under
+  different names when they share the words that are rare across the whole
+  inbox ("Gjerset & Lorenz"), or say the same things -- never two in
+  different buildings, or naming different firms. A pair close to that line
+  is left for a person: `./fff dupes`. One wrongly hidden comes back for
+  good with `./fff correct <id> dismissed 0 "<why>"`.
 - When sources disagree, a person decides: `./fff correct` records a ruling
   that outranks every source.
 
@@ -292,6 +296,7 @@ python3 publish.py data/page.html data/live.html
 | `./fff correct <id> <field> <value> "<why>"` | Overrule a source |
 | `./fff add <events.json>` | Add events by hand; `"source": "groupme"` for one read out of an org's group chat, folded into the email or flyer listing of the same event when there is one; a bare date (`2026-10-28`) is listed as "time TBA" |
 | `./fff merges` | Every group-chat post or duplicate listing folded into another, and why |
+| `./fff dupes` | Listings at the same time that may be one event, for you to judge |
 | `./fff test` | Run the tests |
 
 ## Project layout

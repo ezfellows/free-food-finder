@@ -30,12 +30,16 @@ the email or flyer that arrives after it.
 
 from __future__ import annotations
 
+import itertools
 import json
+import math
 import re
+from collections import Counter
 from datetime import datetime, timezone
 
 import campus
 import store
+import titles
 
 # Sources that repeat an announcement made elsewhere.
 SECONDHAND = ("groupme",)
@@ -167,6 +171,130 @@ def twins(a: dict, b: dict) -> list:
     reasons = ["same day", "same time", "titles share " + ", ".join(sorted(shared))]
     if room_a and room_a == room_b:
         reasons.insert(2, "same room")
+    return reasons
+
+
+# Words that say nothing about which event a text describes, beyond the
+# titles' GENERIC: the furniture of every announcement.
+COMMON = set("""
+will this that these those from have has had you your our they them their
+who what when where which while please rsvp register registration more here
+there all can could would should about also into than then just very any
+some each been being were was are not but its
+""".split())
+
+
+def _terms(text: str) -> list:
+    """The words that could tell one event from another, repeats kept.
+    "Big Law" and "BigLaw" are one word, and "Akin's" is Akin."""
+    text = (text or "").lower().replace("\u2019", "'")
+    text = re.sub(r"\bbig\s+law\b", "biglaw", text)
+    text = re.sub(r"'s\b", "", text)
+    return [w for w in _WORD.findall(text) if len(w) > 2 and not w.isdigit()
+            and w not in GENERIC and w not in COMMON]
+
+
+def rarity(conn) -> dict:
+    """How telling each word is, from every event stored: log(events /
+    events using it). A firm's name in both of two listings at one minute
+    says far more than "panel" does."""
+    used, n = Counter(), 0
+    for title, description in conn.execute("SELECT title, description FROM events"):
+        n += 1
+        used.update(set(_terms(f"{title} {description}")))
+    return {w: max(math.log(n / (1 + c)), 0.0) for w, c in used.items()}
+
+
+def _title_score(a: dict, b: dict, idf: dict):
+    """How much of the less telling title the other shares, by weight."""
+    ta, tb = set(_terms(a.get("title"))), set(_terms(b.get("title")))
+    mass = lambda words: sum(idf.get(w, 0.0) for w in words)
+    smaller = min(mass(ta), mass(tb))
+    shared = ta & tb
+    return (mass(shared) / smaller if smaller else 0.0), shared
+
+
+def _text_score(a: dict, b: dict, idf: dict) -> float:
+    """How alike the two listings' whole texts are, by weight (cosine)."""
+    def vector(e):
+        counts = Counter(_terms(f"{e.get('title')} {e.get('description')}"))
+        return {w: n * idf.get(w, 0.0) for w, n in counts.items()}
+    va, vb = vector(a), vector(b)
+    dot = sum(v * vb.get(w, 0.0) for w, v in va.items())
+    norm = (math.sqrt(sum(v * v for v in va.values()))
+            * math.sqrt(sum(v * v for v in vb.values())))
+    return dot / norm if norm else 0.0
+
+
+def _venue(e: dict) -> str:
+    return (campus.locate(e.get("location") or "").get("venue") or "").strip().lower()
+
+
+def _firm_names(e: dict) -> set:
+    raw = e.get("firms")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw or "[]")
+        except ValueError:
+            raw = []
+    return {f.get("name") if isinstance(f, dict) else str(f) for f in raw or []} - {None, ""}
+
+
+# Measured on every pair of listings stored at one minute (240 of them, Oct
+# 2026). The same event under two names scored 0.51-1.00 on titles or
+# 0.60-0.97 on the whole text; two different events no more than 0.34 and
+# 0.39 -- the French and Italian coffee hours at noon, a firm reception and
+# a GBM out of one newsletter.
+ALIKE_TITLE = 0.5
+ALIKE_TEXT = 0.6
+# One building, two rooms: as often one room under two names ("Multipurpose
+# Room" in the email, "LL201" on the flyer) as two events, so only near-
+# identical titles get past it.
+OTHER_ROOM_TITLE = 0.8
+# Below the line, but close enough for a person to look (`./fff dupes`).
+MAYBE_TITLE = 0.3
+MAYBE_TEXT = 0.35
+
+
+def alike(a: dict, b: dict, idf: dict, title_at: float = ALIKE_TITLE,
+          text_at: float = ALIKE_TEXT) -> list:
+    """Why two first-hand listings at one minute are probably one event under
+    two names, or [].
+
+    `twins` asks for most of the same title. This asks what a reader would:
+    do they share the words that are rare -- "Gjerset & Lorenz" in "Howdy
+    Hoyas: Meet Austin-Based Law Firm Gjerset & Lorenz" and "Gjerset & Lorenz
+    Health Law Q&A + Networking Happy Hour" -- or say the same things? Never
+    when they are in two buildings, or name two different sets of firms.
+    """
+    day_a, min_a = _start(a)
+    day_b, min_b = _start(b)
+    if not day_a or day_a != day_b or min_a is None or min_a != min_b:
+        return []
+    va, vb = _venue(a), _venue(b)
+    if va and vb and va != vb:
+        return []
+    fa, fb = _firm_names(a), _firm_names(b)
+    if fa and fb and not fa & fb:
+        return []
+    title, shared = _title_score(a, b, idf)
+    # One shared word is an organisation's name more often than an event's:
+    # the Kestrel Society's mixer and its elections are two events.
+    if len(shared) < 2:
+        title = 0.0
+    text = _text_score(a, b, idf)
+    ra, rb = _place(a), _place(b)
+    if ra and rb and ra != rb and title < OTHER_ROOM_TITLE:
+        return []
+    if title < title_at and text < text_at:
+        return []
+    reasons = ["same day", "same time"]
+    if va and va == vb:
+        reasons.append("same building")
+    if shared:
+        rare = sorted(shared, key=lambda w: (-idf.get(w, 0.0), w))[:4]
+        reasons.append("titles share " + ", ".join(rare))
+    reasons.append("%d%% of the text alike" % round(text * 100))
     return reasons
 
 
@@ -321,18 +449,9 @@ def fold_secondhand(conn) -> int:
     return folded
 
 
-def fold_duplicates(conn) -> int:
-    """Hide each first-hand listing that is a twin of another (`twins`),
-    folded into it. Returns how many.
-
-    The copy is hidden, not deleted: its email is read again on every
-    refresh, and a deleted row would simply come back. The listing kept is
-    the one a person has ruled on, else the one with a flyer, else the one
-    seen first, so the choice does not change from day to day. A listing
-    with a ruling of its own is never hidden; a fold that was wrong is
-    undone for good with `./fff correct <id> dismissed 0 "<why>"`. Each fold
-    is recorded in the `merges` table, for `./fff merges`.
-    """
+def _candidates(conn) -> list:
+    """First-hand listings still to come, best to keep first, with the ids
+    of those a person has ruled on."""
     rows = [dict(r) for r in conn.execute(
         "SELECT * FROM events WHERE NOT COALESCE(dismissed, 0) "
         "AND NOT COALESCE(all_day, 0) AND COALESCE(starts_at, '') != '' "
@@ -342,8 +461,30 @@ def fold_duplicates(conn) -> int:
     # Ruled back onto the page is ruled a separate event: kept out entirely.
     rows = [r for r in rows if "dismissed" not in fields[r["id"]]]
     ruled = {r["id"] for r in rows if fields[r["id"]]}
-    rows.sort(key=lambda r: (r["id"] not in ruled, not r.get("flyer_id"),
-                             r.get("first_seen") or "", r["id"]))
+    # The one kept keeps its title, so a title that reads as a name beats
+    # one that does not ("Long-overdue GBM next"); a flyer comes along
+    # either way, since `fold` fills in what the kept listing lacks.
+    rows.sort(key=lambda r: (r["id"] not in ruled,
+                             not titles.assess(r["title"], None, r.get("source") or "")["ok"],
+                             not r.get("flyer_id"), r.get("first_seen") or "", r["id"]))
+    return rows, ruled
+
+
+def fold_duplicates(conn) -> int:
+    """Hide each first-hand listing that is another under a second name --
+    `twins`, or `alike` -- folded into it. Returns how many.
+
+    The copy is hidden, not deleted: its email is read again on every
+    refresh, and a deleted row would simply come back. The listing kept is
+    the one a person has ruled on, else the one whose title reads as a name,
+    else the one with a flyer, else the one seen first, so the choice does
+    not change from day to day. A listing with a ruling of its own is never
+    hidden; a fold that was wrong is undone for good with
+    `./fff correct <id> dismissed 0 "<why>"`. Each fold is recorded in the
+    `merges` table, for `./fff merges`.
+    """
+    rows, ruled = _candidates(conn)
+    idf = rarity(conn)
     hidden = set()
     for i, keep in enumerate(rows):
         if keep["id"] in hidden:
@@ -357,7 +498,8 @@ def fold_duplicates(conn) -> int:
             for copy in rows[i + 1:]:
                 if copy["id"] in hidden or copy["id"] in ruled:
                     continue
-                reasons = next((r for r in (twins(m, copy) for m in group) if r), [])
+                reasons = next((r for r in ((twins(m, copy) or alike(m, copy, idf))
+                                            for m in group) if r), [])
                 if not reasons:
                     continue
                 group.append(copy)
@@ -372,6 +514,22 @@ def fold_duplicates(conn) -> int:
                 conn.commit()
                 hidden.add(copy["id"])
     return len(hidden)
+
+
+def possible_duplicates(conn) -> list:
+    """Pairs of listings at one minute that look alike, but not enough to be
+    folded unseen: [(a, b, reasons)], for a person to judge (`./fff dupes`)."""
+    rows, _ = _candidates(conn)
+    idf = rarity(conn)
+    out = []
+    for a, b in itertools.combinations(rows, 2):
+        if twins(a, b) or alike(a, b, idf):
+            continue
+        reasons = alike(a, b, idf, MAYBE_TITLE, MAYBE_TEXT)
+        if reasons:
+            out.append((a, b, reasons))
+    out.sort(key=lambda pair: pair[0]["starts_at"])
+    return out
 
 
 def _sighting(row: dict) -> dict:

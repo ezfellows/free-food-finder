@@ -350,6 +350,21 @@ for ev in events:
 conn.commit()
 ' "${2:-}"
     ;;
+  dupes)
+    # Listings at the same minute that look alike, but not enough to be
+    # merged unseen. Hide the copy with ./fff correct <id> dismissed 1 "<why>";
+    # keep both, and stop the pair being raised, with dismissed 0 on one.
+    exec "$PY" - <<'PYEOF'
+import merge, store
+pairs = merge.possible_duplicates(store.connect())
+for a, b, reasons in pairs:
+    print("%s  %s" % (a["starts_at"][:16].replace("T", " "), "; ".join(reasons)))
+    for e in (a, b):
+        print("    %s  %-12s %s" % (e["id"], (e["source"] or "")[:12], (e["title"] or "")[:80]))
+print("%d pair(s) that may be one event" % len(pairs) if pairs
+      else "no listings at the same time look alike")
+PYEOF
+    ;;
   merges)
     # Every post or duplicate listing folded into another, and why.
     exec "$PY" - <<'PYEOF'
@@ -408,6 +423,6 @@ print("  recorded; later passes will not overwrite it")
 PYEOF
     ;;
   help|-h|--help)
-    echo "usage: ./fff [refresh|build|live|ingest|mail|mailquery|maillog|sources|broadcast|flyers|titles|posts|senders|vet|reground|times|add|merges|correct|ics|next|school|test]" ;;
-  *) echo "usage: ./fff [refresh|build|live|ingest|mail|mailquery|maillog|sources|broadcast|flyers|titles|posts|senders|vet|reground|times|add|merges|correct|ics|next|school|test]"; exit 1 ;;
+    echo "usage: ./fff [refresh|build|live|ingest|mail|mailquery|maillog|sources|broadcast|flyers|titles|posts|senders|vet|reground|times|add|merges|dupes|correct|ics|next|school|test]" ;;
+  *) echo "usage: ./fff [refresh|build|live|ingest|mail|mailquery|maillog|sources|broadcast|flyers|titles|posts|senders|vet|reground|times|add|merges|dupes|correct|ics|next|school|test]"; exit 1 ;;
 esac
