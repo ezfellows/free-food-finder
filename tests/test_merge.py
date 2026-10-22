@@ -183,6 +183,33 @@ class TestFolding(unittest.TestCase):
         self.assertEqual(record["source"], "groupme")
         self.assertIn("same day", record["reasons"])
 
+    def test_a_post_with_the_email_s_own_title_folds_too(self):
+        """Same title, same day is the store's own test of one event. The post
+        must still fold in, not write its "6-8 PM" over the email's 5 o'clock."""
+        verdict, _, reasons = merge.add(self.conn, dict(
+            self.post, title="SIPLA x Statutes and Ladders Game Night",
+            starts_at="2099-03-10T18:00:00", ends_at="2099-03-10T20:00:00"))
+        self.assertEqual(verdict, "merged")
+        self.assertTrue(reasons)
+        row = self.only()
+        self.assertEqual(row["starts_at"], "2099-03-10T17:00:00")
+        self.assertEqual(row["location"], "500 First St NW, Room 750")
+        self.assertEqual(row["source"], "groupme,mail")
+        self.assertIn("A night of board games.", row["description"])
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM merges").fetchone()[0], 1)
+
+    def test_a_post_stored_alone_is_updated_in_place(self):
+        """Nothing else lists it, so there is nothing to fold into: a repeat of
+        the post is the post again."""
+        alone = event(title="Halloween Movie Night", org="ACS", source="groupme",
+                      starts_at="2099-03-11T19:30:00")
+        merge.add(self.conn, alone)
+        verdict, _, reasons = merge.add(self.conn, dict(alone, location="McDonough 205"))
+        self.assertEqual((verdict, reasons), ("updated", []))
+        rows = self.conn.execute(
+            "SELECT location FROM events WHERE source = 'groupme'").fetchall()
+        self.assertEqual([r[0] for r in rows], ["McDonough 205"])
+
     def test_a_post_matching_nothing_is_added(self):
         verdict, eid, reasons = merge.add(self.conn, event(
             title="Halloween Movie Night", org="ACS", source="groupme",

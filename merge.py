@@ -244,7 +244,16 @@ def add(conn, event: dict):
     Returns ("merged", id, reasons) or (store.upsert's verdict, id, []).
     """
     exact = store.stored_id(conn, event)
-    if not exact:
+    if exact:
+        row = conn.execute("SELECT * FROM events WHERE id = ?", (exact,)).fetchone()
+        # The email's own title, on the same day: the store counts that as the
+        # same event, so it folds like any other match. Upserted instead, the
+        # post wrote its own time over the email's -- "6-8 PM" in the chat
+        # moved a 5:30 panel to 6. Only a post stored alone is upserted.
+        if row is not None and not _secondhand(row["source"]):
+            reasons = same_event(event, dict(row)) or ["same title, same day"]
+            return "merged", fold(conn, row, event, reasons), reasons
+    else:
         row, reasons = find(conn, event)
         if row is not None:
             return "merged", fold(conn, row, event, reasons), reasons
