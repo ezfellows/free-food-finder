@@ -190,19 +190,19 @@ def find(conn, event: dict, among_secondhand: bool = True):
             "AND NOT COALESCE(dismissed, 0)", (day,)):
         if event.get("id") and row["id"] == event["id"]:
             continue
-        secondhand = _secondhand(row["source"])
-        if secondhand and not among_secondhand:
+        posted = secondhand(row["source"])
+        if posted and not among_secondhand:
             continue
         reasons = same_event(event, dict(row))
         if not reasons:
             continue
-        rank = len(reasons) + (0 if secondhand else 10)
+        rank = len(reasons) + (0 if posted else 10)
         if rank > best[2]:
             best = (row, reasons, rank)
     return best[0], best[1]
 
 
-def _secondhand(source: str) -> bool:
+def secondhand(source: str) -> bool:
     parts = [p for p in (source or "").split(",") if p]
     return bool(parts) and all(p in SECONDHAND for p in parts)
 
@@ -282,7 +282,7 @@ def add(conn, event: dict):
         # same event, so it folds like any other match. Upserted instead, the
         # post wrote its own time over the email's -- "6-8 PM" in the chat
         # moved a 5:30 panel to 6. Only a post stored alone is upserted.
-        if row is not None and not _secondhand(row["source"]):
+        if row is not None and not secondhand(row["source"]):
             reasons = same_event(event, dict(row)) or ["same title, same day"]
             return "merged", fold(conn, row, event, reasons), reasons
     else:
@@ -301,7 +301,7 @@ def fold_secondhand(conn) -> int:
         "SELECT * FROM events WHERE NOT COALESCE(dismissed, 0) "
         "AND COALESCE(starts_at, '') != ''")]
     for event in rows:
-        if not _secondhand(event["source"]):
+        if not secondhand(event["source"]):
             continue
         row, reasons = find(conn, event, among_secondhand=False)
         if row is None:
@@ -337,7 +337,7 @@ def fold_duplicates(conn) -> int:
         "SELECT * FROM events WHERE NOT COALESCE(dismissed, 0) "
         "AND NOT COALESCE(all_day, 0) AND COALESCE(starts_at, '') != '' "
         "AND starts_at >= date('now', '-1 day')")]
-    rows = [r for r in rows if not _secondhand(r["source"])]
+    rows = [r for r in rows if not secondhand(r["source"])]
     fields = {r["id"]: store.corrected_fields(conn, r["id"]) for r in rows}
     # Ruled back onto the page is ruled a separate event: kept out entirely.
     rows = [r for r in rows if "dismissed" not in fields[r["id"]]]

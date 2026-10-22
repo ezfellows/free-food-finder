@@ -229,6 +229,8 @@ def payload(events) -> str:
         slim.append({
             "id": e["id"], "title": e["title"], "start": e["starts_at"],
             "end": e["ends_at"], "allDay": bool(e["all_day"]),
+            # A chat post's day with no hour: "time TBA", not "all day".
+            "timeTba": bool(e.get("time_tba")),
             "place": e.get("place") or e.get("location") or "",
             "org": e.get("org") or "", "source": e.get("source_label") or "",
             "food": bool(e.get("matches_food")), "tier": e.get("tier") or "",
@@ -997,7 +999,7 @@ button.wide{width:100%;margin-top:18px;padding:12px}
   // "5:30pm-7:00pm" spends eight characters saying pm twice.
   function fmtSpan(e) {
     var start = when(e);
-    if (e.allDay) return "all day";
+    if (e.allDay) return e.timeTba ? "time TBA" : "all day";
     var text = fmtTime(start);
     if (!e.end) return text;
     var end = new Date(e.end);
@@ -1250,7 +1252,7 @@ button.wide{width:100%;margin-top:18px;padding:12px}
 
   function rsvpRow(r) {
     var e = r.e, id = "rsvp-" + e.id;
-    var meta = dayShort(when(e)) + (e.allDay ? "" : ", " + fmtSpan(e)) +
+    var meta = dayShort(when(e)) + (e.allDay && !e.timeTba ? "" : ", " + fmtSpan(e)) +
       (e.place ? " · " + e.place : "");
     var recep = recepTag(e);
     var chips = (recep ? '<span class="tag ' + recep[0] + '">' + esc(recep[1]) +
@@ -1404,7 +1406,7 @@ button.wide{width:100%;margin-top:18px;padding:12px}
     if (!e) { el.innerHTML = ""; return; }
     var d = when(e), bits = [];
     if (e.place) bits.push(esc(e.place));
-    bits.push(esc(dayLabel(d)) + (e.allDay ? "" : ", " + esc(fmtSpan(e))));
+    bits.push(esc(dayLabel(d)) + (e.allDay && !e.timeTba ? "" : ", " + esc(fmtSpan(e))));
     el.innerHTML = '<div class="lead"><div class="when">Next up · ' +
       esc(countdown(d, e.allDay)) + '</div><h2>' + esc(e.title) + "</h2><p>" +
       bits.join(" &middot; ") + "</p></div>";
@@ -1515,9 +1517,9 @@ button.wide{width:100%;margin-top:18px;padding:12px}
           // landscape does not need a re-render to widen.
           html += '<div class="pip' + (!e.food && e.net ? " net" : "") + '">' +
             '<span class="at long">' +
-              esc(e.allDay ? "all day" : fmtSpan(e)) + "</span>" +
+              esc(fmtSpan(e)) + "</span>" +
             '<span class="at short">' +
-              esc(e.allDay ? "all day" : fmtTimeShort(at)) + "</span>" +
+              esc(e.allDay ? (e.timeTba ? "TBA" : "all day") : fmtTimeShort(at)) + "</span>" +
             '<span class="what">' + esc(e.title) + "</span></div>";
         });
         if (found.length > 3) html += '<div class="more">+' + (found.length - 3) + "</div>";

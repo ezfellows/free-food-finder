@@ -290,7 +290,7 @@ python3 publish.py data/page.html data/live.html
 | `./fff posts` | Submissions from the page, with the evidence for each |
 | `./fff titles`, `vet`, `times` | Checks: odd titles, personal content, clock disagreements |
 | `./fff correct <id> <field> <value> "<why>"` | Overrule a source |
-| `./fff add <events.json>` | Add events by hand; `"source": "groupme"` for one read out of an org's group chat, folded into the email or flyer listing of the same event when there is one |
+| `./fff add <events.json>` | Add events by hand; `"source": "groupme"` for one read out of an org's group chat, folded into the email or flyer listing of the same event when there is one; a bare date (`2026-10-28`) is listed as "time TBA" |
 | `./fff merges` | Every group-chat post or duplicate listing folded into another, and why |
 | `./fff test` | Run the tests |
 

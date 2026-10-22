@@ -317,12 +317,16 @@ for ev in events:
         continue
     text = ev.get("description") or ""
     where = ev.get("location") or ""
+    # A day and no hour: listed on that day as "time TBA", no hour made up.
+    starts = ev["starts_at"].strip()
+    bare = len(starts) == 10
     food = score_event(title=ev["title"], description=text, location=where)
     net = score_network(title=ev["title"], description=text, location=where,
                         org=ev["org"])
-    row = {"title": ev["title"], "starts_at": ev["starts_at"],
+    row = {"title": ev["title"],
+           "starts_at": starts + "T00:00:00" if bare else starts,
            "ends_at": ev.get("ends_at"), "location": where, "org": ev["org"],
-           "description": text, "source": source, "all_day": False,
+           "description": text, "source": source, "all_day": bare,
            "date_confidence": 95,
            # Only a sign-up page the same for every reader (docket.signup_page).
            "rsvp_url": ev.get("rsvp_url") if signup_page(ev.get("rsvp_url") or "") else ""}

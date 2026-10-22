@@ -337,6 +337,10 @@ def build_events(conn, days: int = 30, min_tier: str = "possible",
         event["food_note"] = store.correction_reason(conn, event["id"],
                                                      ("has_food", "tier"))
         event["source_label"] = pretty_source(event.get("source"))
+        # A chat post that gave a day and no hour is not an all-day event;
+        # once an email or flyer with a time is folded in, it has one.
+        event["time_tba"] = bool(event.get("all_day")) and merge.secondhand(
+            event.get("source"))
         event["firms"] = public_firms(event.get("firms"))
         event["firm_summary"] = firm_summary(event["firms"])
         event["reason"] = event.get("reason") or ""

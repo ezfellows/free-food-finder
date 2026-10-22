@@ -427,7 +427,7 @@ class TestTimesAreShownWhole(unittest.TestCase):
         script = app_script()
         self.assertIn('class="rail">\' + esc(fmtSpan(e))', script)
         self.assertIn('", " + esc(fmtSpan(e))', script)      # "Next up"
-        self.assertIn('"all day" : fmtSpan(e)', script)      # calendar pip
+        self.assertIn('esc(fmtSpan(e)) + "</span>"', script)  # calendar pip
 
     def test_a_shared_meridiem_is_printed_once(self):
         self.assertIn('sameHalf', app_script())
@@ -690,3 +690,21 @@ class TestReceptions(unittest.TestCase):
             "ends_at": None, "all_day": 0, "reception": "reception"}])
             .replace("<\\/", "</"))[0]
         self.assertEqual(data["reception"], "reception")
+
+
+class TestATimeNotYetGiven(unittest.TestCase):
+    """A chat post gives the day and no hour: "time TBA", never "all day"."""
+
+    def test_the_page_says_so_wherever_a_time_would_be(self):
+        script = app_script()
+        self.assertIn('if (e.allDay) return e.timeTba ? "time TBA" : "all day";', script)
+        self.assertIn('e.timeTba ? "TBA" : "all day"', script)
+        self.assertEqual(script.count("e.allDay && !e.timeTba ?"), 2)
+
+    def test_the_page_is_handed_it(self):
+        data = json.loads(publish.payload([{
+            "id": "e2", "title": "Dinner Reception", "starts_at": "2099-01-01T00:00:00",
+            "ends_at": None, "all_day": 1, "time_tba": True}])
+            .replace("<\\/", "</"))[0]
+        self.assertTrue(data["allDay"])
+        self.assertTrue(data["timeTba"])

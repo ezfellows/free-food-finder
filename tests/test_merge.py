@@ -447,5 +447,23 @@ class TestTheAddCommand(unittest.TestCase):
         self.assertEqual(row["rsvp_url"], "")
 
 
+    def test_a_day_with_no_hour_is_listed_as_time_tba(self):
+        """Never an hour made up; and an email with one is still all day."""
+        self.run_add([{"title": "Dinner Reception with Hale & Partners",
+                       "org": "Kestrel Society", "source": "groupme",
+                       "starts_at": "2099-03-12", "description": "Free dinner."}])
+        conn = store.connect(self.db)
+        self.addCleanup(conn.close)
+        store.upsert(conn, event(title="Kestrel Open House", all_day=True,
+                                 starts_at="2099-03-13T00:00:00"))
+        row = conn.execute("SELECT starts_at, all_day FROM events WHERE title = ?",
+                           ("Dinner Reception with Hale & Partners",)).fetchone()
+        self.assertEqual(tuple(row), ("2099-03-12T00:00:00", 1))
+        tba = {e["title"]: e["time_tba"] for e in docket.build_events(
+            conn, days=99999, min_tier="unlikely")}
+        self.assertTrue(tba["Dinner Reception with Hale & Partners"])
+        self.assertFalse(tba["Kestrel Open House"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
