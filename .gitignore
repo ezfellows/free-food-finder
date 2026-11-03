@@ -1,0 +1,12 @@
+# Everything in data/ is yours -- your mail, your event log, your settings, the
+# page built from them -- except the three files the project ships. Listing
+# what to keep rather than what to hide means a new file there is private by
+# default.
+data/*
+!data/.gitkeep
+!data/firms.json
+!data/config.example.json
+
+__pycache__/
+*.pyc
+.DS_Store

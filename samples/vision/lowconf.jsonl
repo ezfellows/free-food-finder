@@ -1,0 +1,2 @@
+{"path":"/fixtures/lowconf.jpg","ok":true,"width":800,"height":1000,"ocr_rev":3,"ms":210,"lines":[{"text":"FREE PIZZ","conf":0.31,"x":0.1,"y":0.08,"w":0.6,"h":0.09},{"text":"SEPT 1?","conf":0.28,"x":0.1,"y":0.22,"w":0.4,"h":0.05}],"barcodes":[],"error":null}
+{"path":"/fixtures/failed.jpg","ok":false,"width":0,"height":0,"ocr_rev":3,"ms":2,"lines":[],"barcodes":[],"error":"unsupported image format"}

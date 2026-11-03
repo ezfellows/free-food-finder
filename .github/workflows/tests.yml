@@ -1,0 +1,38 @@
+# The tests, on every push and pull request.
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux, Python ${{ matrix.python }}
+    # 24.04 named outright: the last Python 3.9 builds were made for it.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest Python the README promises, and the newest.
+        python: ["3.9", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - run: ./fff test
+
+  macos:
+    name: macOS, Apple's python3
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      # The python3 that comes with Apple's Command Line Tools: what a
+      # student's Mac has, with nothing installed.
+      - run: /usr/bin/python3 --version
+      - run: PATH="/usr/bin:$PATH" ./fff test
