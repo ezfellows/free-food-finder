@@ -1,0 +1,23 @@
+# The tests on a Mac, on every push and pull request. Kept apart from
+# tests.yml, whose result the README's badge shows: GitHub's Mac runners are
+# often too busy to start a job, and that is no failure of the code.
+name: Tests (macOS)
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS, Apple's python3
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      # The python3 that comes with Apple's Command Line Tools: what a
+      # student's Mac has, with nothing installed.
+      - run: /usr/bin/python3 --version
+      - run: PATH="/usr/bin:$PATH" ./fff test

@@ -26,13 +26,6 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: ./fff test
 
-  macos:
-    name: macOS, Apple's python3
-    runs-on: macos-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-      # The python3 that comes with Apple's Command Line Tools: what a
-      # student's Mac has, with nothing installed.
-      - run: /usr/bin/python3 --version
-      - run: PATH="/usr/bin:$PATH" ./fff test
+# The Mac tests are in tests-macos.yml. GitHub's Mac runners are often too
+# busy to start a job at all, and a job that never started marked this
+# workflow, and the README's badge, as failing.
